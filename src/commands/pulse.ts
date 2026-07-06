@@ -1,5 +1,12 @@
 import { ssh } from "../ssh";
 import { cmdWake } from "./wake";
+import { loadConfig } from "../config";
+
+function pulseTarget(): { repo: string; owner: string; projectNum: number } {
+  const config = loadConfig() as any;
+  const repo = config.pulseRepo || "YourOrg/pulse-oracle";
+  return { repo, owner: repo.split("/")[0], projectNum: config.pulseProject || 1 };
+}
 
 const THAI_DAYS = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
 
@@ -105,8 +112,7 @@ async function addTaskToPeriodComment(repo: string, threadNum: number, period: s
 }
 
 export async function cmdPulseAdd(title: string, opts: { oracle?: string; priority?: string; wt?: string }) {
-  const repo = "YourOrg/pulse-oracle";
-  const projectNum = 1; // Master Board
+  const { repo, owner, projectNum } = pulseTarget();
   const period = timePeriod();
 
   // 0. Find or create daily thread
@@ -131,7 +137,7 @@ export async function cmdPulseAdd(title: string, opts: { oracle?: string; priori
 
   // 3. Add to Master Board
   try {
-    await ssh(`gh project item-add ${projectNum} --owner YourOrg --url '${issueUrl}'`);
+    await ssh(`gh project item-add ${projectNum} --owner ${owner} --url '${issueUrl}'`);
     console.log(`\x1b[32m+\x1b[0m added to Master Board (#${projectNum})`);
   } catch (e) {
     console.log(`\x1b[33mwarn:\x1b[0m could not add to project board: ${e}`);
@@ -154,7 +160,7 @@ export async function cmdPulseAdd(title: string, opts: { oracle?: string; priori
 }
 
 export async function cmdPulseLs(opts: { sync?: boolean }) {
-  const repo = "YourOrg/pulse-oracle";
+  const { repo } = pulseTarget();
 
   // Fetch all open issues
   const issuesJson = (await ssh(
