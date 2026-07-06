@@ -15,16 +15,21 @@ function inferCaller(message?: string): string {
     const m = message.match(/\[[\w-]+:([\w-]+)\]/);
     if (m) return m[1];
   }
+  try {
+    // Own pane's window name is ground truth — it beats CLAUDE_AGENT_NAME, which
+    // panes inherit from tmux global env and can be stale for every oracle
+    // (Dreams 2026-07-06: a global CLAUDE_AGENT_NAME=Nobi-Oracle tagged ALL
+    // senders as nobi). Without -t, display-message reports the attached
+    // client's current window, not the caller's.
+    const pane = process.env.TMUX_PANE;
+    if (pane) {
+      const win = execSync(`tmux display-message -p -t '${pane}' '#W'`, { encoding: "utf-8" }).trim();
+      if (win) return win.replace(/^\d+-/, "");
+    }
+  } catch {}
   if (process.env.CLAUDE_AGENT_NAME) return process.env.CLAUDE_AGENT_NAME;
   try {
-    // Target the calling pane explicitly — without -t, display-message reports the
-    // attached client's current window, mis-attributing senders to whichever window
-    // the human is watching (#from-tag bug, Dreams 2026-07-06)
-    const pane = process.env.TMUX_PANE;
-    const cmd = pane
-      ? `tmux display-message -p -t '${pane}' '#W'`
-      : "tmux display-message -p '#W'";
-    const win = execSync(cmd, { encoding: "utf-8" }).trim();
+    const win = execSync("tmux display-message -p '#W'", { encoding: "utf-8" }).trim();
     if (win) return win.replace(/^\d+-/, "");
   } catch {}
   return "cli";
