@@ -17,8 +17,15 @@ function inferCaller(message?: string): string {
   }
   if (process.env.CLAUDE_AGENT_NAME) return process.env.CLAUDE_AGENT_NAME;
   try {
-    const win = execSync("tmux display-message -p '#W'", { encoding: "utf-8" }).trim();
-    if (win) return win.replace(/^\\d+-/, "");
+    // Target the calling pane explicitly — without -t, display-message reports the
+    // attached client's current window, mis-attributing senders to whichever window
+    // the human is watching (#from-tag bug, Dreams 2026-07-06)
+    const pane = process.env.TMUX_PANE;
+    const cmd = pane
+      ? `tmux display-message -p -t '${pane}' '#W'`
+      : "tmux display-message -p '#W'";
+    const win = execSync(cmd, { encoding: "utf-8" }).trim();
+    if (win) return win.replace(/^\d+-/, "");
   } catch {}
   return "cli";
 }
