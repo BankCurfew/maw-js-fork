@@ -111,6 +111,9 @@ export class StatusDetector {
             /\(\d+[smh]?\s*\d*s?\s*·/.test(l) ||
             /esc to interrupt/i.test(l) ||
             /^[⚡📖✏️🔍🤖🔌🔧]\s+\w/.test(l) ||
+            /^●\s*(Running|Ran|Bash|Read|Edit|Write|Grep|Glob|Task|Fetch|Update|Search|Web|Monitor|Agent|Workflow|Skill|Artifact)\b/.test(l) ||
+            /^\s*\$\s/.test(l) ||
+            /^\s*⎿/.test(l) ||
             /Compacting/i.test(l)
           );
           const prevStatus = prev?.status || "ready";

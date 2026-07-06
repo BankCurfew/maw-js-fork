@@ -62,6 +62,8 @@ export const OracleSheet = memo(function OracleSheet({
   const [advisoryShown, setAdvisoryShown] = useState(false);
   const [queueInfo, setQueueInfo] = useState<{ count: number; items: string[]; typing: string | null } | null>(null);
   const [activityItems, setActivityItems] = useState<{ msg: string; ts: number }[]>([]);
+  const liveToolsRef = useRef<{ name: string; command: string }[]>([]);
+  const [promptDialog, setPromptDialog] = useState<{ text: string; options: { label: string; key: string }[] } | null>(null);
   const fileValidCache = useRef(new Map<string, boolean>());
   const lastMsgHtmlRef = useRef("");
   const busyDivRef = useRef<HTMLDivElement>(null);
@@ -147,7 +149,9 @@ export const OracleSheet = memo(function OracleSheet({
   const msgsRef = useRef<any[]>([]);
   const lastPollHashRef = useRef("");
 
+  // Extract oracle key for transcript API (handles aliases like yourapp→yourapp)
   const ORACLE_ALIASES: Record<string, string> = {
+    yourapp: "yourapp", yourapporacle: "yourapp",
   };
   const rawName = agent.name.replace(/-oracle$/i, "").replace(/-/g, "").toLowerCase();
   const oracleName = ORACLE_ALIASES[rawName] || rawName;
@@ -209,6 +213,14 @@ export const OracleSheet = memo(function OracleSheet({
       overlay.appendChild(img);
       document.body.appendChild(overlay);
     };
+    // V19+V20: prompt dialog answer
+    (window as any).__promptAnswer = (key: string) => {
+      send({ type: "send", target: agent.target, text: key === "\x1b" ? "\x1b" : key, force: true });
+      if (key !== "\x1b") {
+        setTimeout(() => send({ type: "send", target: agent.target, text: "\r", force: true }), 500);
+      }
+      setPromptDialog(null);
+    };
     (window as any).__dismissAdvisory = () => {
       send({ type: "send", target: agent.target, text: "\x1b", force: true });
       setTimeout(() => send({ type: "send", target: agent.target, text: "\r", force: true }), 500);
@@ -240,7 +252,7 @@ export const OracleSheet = memo(function OracleSheet({
       const el = termRef.current;
       if (el) renderMessages(msgsRef.current, el);
     };
-    return () => { delete (window as any).__msgCopy; delete (window as any).__msgReply; delete (window as any).__msgReplyCancel; delete (window as any).__imgLightbox; delete (window as any).__dismissAdvisory; delete (window as any).__filePreview; delete (window as any).__msgExpand; };
+    return () => { delete (window as any).__msgCopy; delete (window as any).__msgReply; delete (window as any).__msgReplyCancel; delete (window as any).__imgLightbox; delete (window as any).__promptAnswer; delete (window as any).__dismissAdvisory; delete (window as any).__filePreview; delete (window as any).__msgExpand; };
   }, []);
 
   const replyRef = useRef<{ idx: number; sender: string; time: string; preview: string } | null>(null);
@@ -554,6 +566,8 @@ export const OracleSheet = memo(function OracleSheet({
           const imgHtml = renderImageRow(images);
           const files = extractFiles(displayText);
           const fileHtml = renderFileChips(files);
+          // BUG A fix: skip tool-only turns with no visible content
+          if (displayText.trim() === "" && images.length === 0 && files.length === 0 && !chips.tickets.length && !chips.project) return "";
           const noise = isToolNoise(displayText);
           const long = displayText.length > 500;
           const msgId = m.idx ?? 0;
@@ -608,6 +622,30 @@ export const OracleSheet = memo(function OracleSheet({
             <div style="color:#ef4444;font-size:12px;margin-bottom:6px">⚠️ Usage advisory / rate limit notice detected</div>
             <button onclick="window.__dismissAdvisory()" style="background:#ef4444;color:white;border:none;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Dismiss Notice</button>
           </div>`;
+        }
+        // V19: prompt dialog card
+        if (promptDialog) {
+          const optBtns = promptDialog.options.map(o => {
+            const isDestructive = /delete|remove|rm|overwrite|drop|destroy/i.test(o.label);
+            const bg = isDestructive ? "rgba(239,68,68,0.15)" : "rgba(34,211,238,0.15)";
+            const border = isDestructive ? "rgba(239,68,68,0.3)" : "rgba(34,211,238,0.3)";
+            const color = isDestructive ? "#f38ba8" : "#22d3ee";
+            return `<button onclick="window.__promptAnswer('${esc(o.key)}')" style="background:${bg};border:1px solid ${border};color:${color};padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">${esc(o.label)}</button>`;
+          }).join(" ");
+          busyHtml += `<div style="background:rgba(249,226,175,0.08);border:1px solid rgba(249,226,175,0.25);border-radius:10px;padding:12px;margin-bottom:8px">
+            <div style="color:#f9e2af;font-size:12px;font-weight:600;margin-bottom:6px">⚠ Awaiting Decision</div>
+            <div style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:8px;font-style:italic">${esc(promptDialog.text)}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${optBtns}</div>
+          </div>`;
+        }
+        // T063 pivot: ephemeral live tool commands (from WS deltas)
+        if (liveToolsRef.current.length > 0 && workingRef.current) {
+          for (const t of liveToolsRef.current.slice(-2)) {
+            busyHtml += `<div style="margin:2px 0 2px 27px;padding:3px 6px;border-left:2px solid rgba(34,211,238,0.3);background:rgba(34,211,238,0.03);border-radius:0 4px 4px 0">
+              <span style="font-size:10px;color:#22d3ee;font-weight:600">⚡ ${esc(t.name)}</span>
+              <pre style="font-size:10px;color:rgba(255,255,255,0.35);margin:1px 0 0;white-space:pre-wrap;word-break:break-all">${esc((t.command || "").slice(0, 120))}</pre>
+            </div>`;
+          }
         }
         // T034: live activity timeline
         if (activityItems.length > 0) {
@@ -700,6 +738,7 @@ export const OracleSheet = memo(function OracleSheet({
           if (thinking.statusRegion) statusRegion = thinking.statusRegion;
           if (thinking.thinkingLine) thinkingLine = thinking.thinkingLine;
           if (thinking.advisory) advisoryDetected = true;
+          setPromptDialog(thinking.promptDialog || null);
           if (thinking.queue) queueData = thinking.queue;
         } catch {}
 
@@ -749,6 +788,7 @@ export const OracleSheet = memo(function OracleSheet({
             workingRef.current = thinkingLine;
           } else {
             workingRef.current = "";
+            liveToolsRef.current = [];
           }
           const el = termRef.current;
           if (el) {
@@ -856,17 +896,19 @@ export const OracleSheet = memo(function OracleSheet({
           const existing = msgsRef.current.filter((m: any) => !m.pending);
           const raw = [...existing, ...freshTranscript, ...freshOutbound]
             .sort((a: any, b: any) => (a.ts || "").localeCompare(b.ts || ""));
+          // T058v2: dedup by ts+role
           const seen = new Set<string>();
           const merged = raw.filter((m: any) => {
-            const key = `${m.ts || ""}|${m.role || ""}|${(m.text || "").slice(0, 60)}`;
+            const key = `${m.ts || ""}|${m.role || ""}`;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
           });
-          // Remove pending if their content appeared in fresh transcript
-          msgsRef.current = [...merged, ...pending.filter((p: any) =>
-            !freshTranscript.some((f: any) => f.role === "user" && f.text?.slice(0, 30) === p.text?.slice(0, 30))
-          )];
+          // Reconcile pending by ts proximity (<5s)
+          msgsRef.current = [...merged, ...pending.filter((p: any) => {
+            const pTs = new Date(p.ts || 0).getTime();
+            return !freshTranscript.some((f: any) => f.role === "user" && Math.abs(new Date(f.ts || 0).getTime() - pTs) < 5000);
+          })];
           const el = termRef.current;
           if (el) {
             renderMessages(msgsRef.current, el);
@@ -891,20 +933,23 @@ export const OracleSheet = memo(function OracleSheet({
         ...m, idx: (msgsRef.current.length > 0 ? msgsRef.current[msgsRef.current.length - 1].idx + 1 : 0) + i,
       }));
       if (newMsgs.length === 0) return;
-      // T058: dedup against existing messages + reconcile pending (optimistic echo)
+      // T058v2: robust dedup — ts+role exact match OR pending reconcile by ts proximity
       const seen = new Set<string>();
-      const pendingTexts = new Set<string>();
       msgsRef.current.forEach((m: any) => {
-        seen.add(`${m.ts || ""}|${m.role || ""}|${(m.text || "").slice(0, 60)}`);
-        if (m.pending) pendingTexts.add((m.text || "").slice(0, 60));
+        seen.add(`${m.ts || ""}|${m.role || ""}`);
       });
       const fresh = newMsgs.filter((m: any) => {
-        const key = `${m.ts || ""}|${m.role || ""}|${(m.text || "").slice(0, 60)}`;
+        const key = `${m.ts || ""}|${m.role || ""}`;
         if (seen.has(key)) return false;
-        // Reconcile: if incoming matches a pending msg's text, remove the pending
-        if (m.role === "user" && pendingTexts.has((m.text || "").slice(0, 60))) {
-          msgsRef.current = msgsRef.current.filter((x: any) => !(x.pending && (x.text || "").slice(0, 60) === (m.text || "").slice(0, 60)));
-          pendingTexts.delete((m.text || "").slice(0, 60));
+        // Reconcile pending: if incoming user msg arrives within 5s of a pending msg, replace it
+        if (m.role === "user") {
+          const incomingTs = new Date(m.ts || 0).getTime();
+          const pendingMatch = msgsRef.current.findIndex((x: any) =>
+            x.pending && x.role === "user" && Math.abs(new Date(x.ts || 0).getTime() - incomingTs) < 5000
+          );
+          if (pendingMatch >= 0) {
+            msgsRef.current.splice(pendingMatch, 1);
+          }
         }
         return true;
       });
@@ -917,6 +962,9 @@ export const OracleSheet = memo(function OracleSheet({
       }
       // T031: validate file paths in delta messages for live chip rendering
       validateFilePaths(fresh);
+      // T063 pivot: capture live tools from deltas (ephemeral — for busy bubble)
+      const deltaTools = fresh.flatMap((m: any) => (m.tools || []).map((t: any) => ({ name: t.name, command: t.command })));
+      if (deltaTools.length > 0) liveToolsRef.current = deltaTools.slice(-3);
     };
     window.addEventListener("transcript-delta", onDelta);
 

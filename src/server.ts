@@ -182,6 +182,9 @@ app.get("/api/thinking", async (c) => {
       (/\(\d+[smh]?\s*\d*s?\s*·/.test(l) ||
        /esc to interrupt/i.test(l) ||
        /^[⚡📖✏️🔍🤖🔌🔧]\s+\w/.test(l) ||
+       /^●\s*(Running|Ran|Bash|Read|Edit|Write|Grep|Glob|Task|Fetch|Update|Search|Web|Monitor|Agent|Workflow|Skill|Artifact)\b/.test(l) ||
+       /^\s*\$\s/.test(l) ||
+       /^\s*⎿/.test(l) ||
        /Compacting/i.test(l))
     ).slice(-4);
     const thinkingLine = statusLines.length > 0 ? statusLines.join(" · ") : null;
@@ -193,7 +196,36 @@ app.get("/api/thinking", async (c) => {
     const pendingItems = queueLines.filter(l => /^!\s*\[from/.test(l)).map(l => l.replace(/^!\s*/, "").slice(0, 80));
     const promptText = queueLines.find(l => /^❯\s+\S/.test(l))?.replace(/^❯\s+/, "").slice(0, 80) || null;
     const queue = (hasQueueMarker || pendingItems.length > 0 || promptText) ? { count: pendingItems.length + (promptText ? 1 : 0), items: pendingItems, typing: promptText } : undefined;
-    return c.json({ thinkingLine, statusRegion: statusLines.length > 0 ? statusLines : undefined, advisory: isAdvisory || undefined, queue });
+    // V19: detect prompt dialogs (permission, survey, y/n)
+    let promptDialog: { text: string; options: { label: string; key: string }[] } | undefined;
+    const paneLines = allLines;
+    const dialogPatterns = [
+      /\(y\/n\)/i, /Do you want/i, /requires? approval/i, /Esc to cancel/i,
+      /proceed\?/i, /How is Claude/i, /Are you sure/i, /allow.*\?/i,
+    ];
+    const hasDialog = paneLines.some(l => dialogPatterns.some(p => p.test(l)));
+    if (hasDialog) {
+      const dialogLines = paneLines.filter(l => !l.startsWith("📡") && !l.startsWith("⏵") && !/^────/.test(l));
+      const promptLine = dialogLines.find(l => dialogPatterns.some(p => p.test(l))) || "";
+      const options: { label: string; key: string }[] = [];
+      // Parse numbered options: "1. Yes", "2. No", "1:Bad 2:Fine"
+      for (const l of dialogLines) {
+        const numbered = l.matchAll(/(\d+)[.:)]\s*([A-Za-z][A-Za-z\s]*?)(?=\s+\d+[.:)]|\s*$)/g);
+        for (const m of numbered) {
+          options.push({ label: `${m[1]}. ${m[2].trim()}`, key: m[1] });
+        }
+      }
+      // Parse y/n
+      if (options.length === 0 && /\(y\/n\)/i.test(promptLine)) {
+        options.push({ label: "Yes", key: "y" }, { label: "No", key: "n" });
+      }
+      // Always add Esc
+      if (!options.some(o => o.key.toLowerCase() === "esc")) {
+        options.push({ label: "Esc Cancel", key: "\x1b" });
+      }
+      promptDialog = { text: promptLine.slice(0, 120), options };
+    }
+    return c.json({ thinkingLine, statusRegion: statusLines.length > 0 ? statusLines : undefined, advisory: isAdvisory || undefined, queue, promptDialog });
   } catch {
     return c.json({ thinkingLine: null });
   }
@@ -380,7 +412,7 @@ app.post("/api/send", async (c) => {
   const { target, text, from: senderFrom } = await c.req.json();
   if (!target || !text) return c.json({ error: "target and text required" }, 400);
 
-  // Cross-node routing: "curfew:01-bob" → forward to peer (T025: only for KNOWN peers)
+  // Cross-node routing: "node:01-bob" → forward to peer (T025: only for KNOWN peers)
   if (target.includes(":")) {
     const colonIdx = target.indexOf(":");
     const prefix = target.slice(0, colonIdx);
@@ -1009,7 +1041,7 @@ app.post("/api/worktrees/cleanup", async (c) => {
 });
 
 // --- Hall of Fame ---
-const hallOfFamePath = join(process.env.HOME || "/home/curfew", "repos/github.com/YourOrg/HR-Oracle/hall-of-fame/data.json");
+const hallOfFamePath = join(process.env.HOME || "/home/user", "repos/github.com/YourOrg/HR-Oracle/hall-of-fame/data.json");
 
 app.get("/api/hall-of-fame", (c) => {
   try {
@@ -1547,7 +1579,7 @@ app.post("/api/loops/add", async (c) => {
     if (!newLoop.id || !newLoop.schedule) return c.json({ error: "id and schedule required" }, 400);
     const { readFileSync, writeFileSync } = await import("fs");
     const { join } = await import("path");
-    const loopsPath = join(process.env.HOME || "/home/curfew", ".maw", "loops.json");
+    const loopsPath = join(process.env.HOME || "/home/user", ".maw", "loops.json");
     const config = JSON.parse(readFileSync(loopsPath, "utf-8"));
     const idx = config.loops.findIndex((l: any) => l.id === newLoop.id);
     if (idx >= 0) {
@@ -1567,7 +1599,7 @@ app.delete("/api/loops", async (c) => {
   if (!loopId) return c.json({ error: "id required" }, 400);
   const { readFileSync, writeFileSync } = await import("fs");
   const { join } = await import("path");
-  const loopsPath = join(process.env.HOME || "/home/curfew", ".maw", "loops.json");
+  const loopsPath = join(process.env.HOME || "/home/user", ".maw", "loops.json");
   const config = JSON.parse(readFileSync(loopsPath, "utf-8"));
   const before = config.loops.length;
   config.loops = config.loops.filter((l: any) => l.id !== loopId);
@@ -1699,7 +1731,7 @@ app.get("/api/health-check", async (c) => {
   };
 
   // PM2 services
-  for (const svc of ["maw", "maw-bob", "arra-api", "maw-syslog", ]) {
+  for (const svc of ["maw", "maw-bob", "arra-api", "maw-syslog"]) {
     await check(`PM2: ${svc}`, async () => {
       const pid = run(`pm2 pid ${svc} 2>/dev/null`);
       return pid && pid !== "0" ? null : "not running";
@@ -1707,7 +1739,7 @@ app.get("/api/health-check", async (c) => {
   }
 
   // Port checks
-  for (const p of [{ port: 3456, name: "maw-js" }, { port: 3457, name: "maw-bob" }, ]) {
+  for (const p of [{ port: 3456, name: "maw-js" }, { port: 3457, name: "maw-bob" }, { port: 47778, name: "arra-api" }]) {
     await check(`Port :${p.port} (${p.name})`, async () => {
       try {
         const res = await fetch(`http://localhost:${p.port}/`, { signal: AbortSignal.timeout(3000) });
