@@ -1,0 +1,35 @@
+{
+  "node": "my-office",
+  "host": "local",
+  "port": 3456,
+  "ghqRoot": "/Users/you/repos/github.com",
+  "oracleUrl": "http://localhost:47779",
+
+  "env": {
+    "CLAUDE_CODE_OAUTH_TOKEN": "<your-token-here>"
+  },
+
+  "commands": {
+    "default": "claude --dangerously-skip-permissions --continue",
+    "*-oracle": "claude --dangerously-skip-permissions --continue"
+  },
+
+  "preWake": [],
+
+  "rooms": {
+    "command": {
+      "label": "Command",
+      "lead": "BoB-Oracle",
+      "members": ["BoB-Oracle", "shell"]
+    },
+    "engineering": {
+      "label": "Engineering",
+      "lead": "Dev-Oracle",
+      "members": ["Dev-Oracle", "QA-Oracle"]
+    }
+  },
+
+  "sessions": {
+    "shell": "shell"
+  }
+}

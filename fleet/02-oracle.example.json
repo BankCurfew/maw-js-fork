@@ -1,0 +1,10 @@
+{
+  "name": "02-dev",
+  "windows": [
+    {
+      "name": "Dev-Oracle",
+      "repo": "YourOrg/Dev-Oracle"
+    }
+  ],
+  "sync_peers": ["bob", "qa"]
+}

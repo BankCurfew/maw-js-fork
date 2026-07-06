@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>maw-js Office Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: system-ui, -apple-system, sans-serif; padding: 2rem; }
+  h1 { color: #64b5f6; margin-bottom: 0.5rem; }
+  p.sub { color: #777; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+  .card { background: #1a1a2e; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; text-decoration: none; color: inherit; transition: border-color 0.2s; }
+  .card:hover { border-color: #64b5f6; }
+  .card h2 { color: #64b5f6; font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .card p { color: #999; font-size: 0.9rem; line-height: 1.4; }
+  .card code { background: #0d0d1a; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #4fc3f7; }
+  .tag { display: inline-block; background: #1e3a5f; color: #64b5f6; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+  <h1>maw-js Office Demo</h1>
+  <p class="sub">Each page is standalone React — no build tools, no bundler. React 19 via ESM.</p>
+  <div class="grid">
+    <a class="card" href="sessions.html">
+      <h2>Sessions</h2>
+      <p>Live session list from <code>GET /api/sessions</code>. Shows tmux sessions, windows, source (local/peer).</p>
+      <span class="tag">REST</span>
+    </a>
+    <a class="card" href="feed.html">
+      <h2>Live Feed</h2>
+      <p>Real-time feed via <code>WebSocket</code>. Tool use, status changes, user prompts — as they happen.</p>
+      <span class="tag">WebSocket</span>
+    </a>
+    <a class="card" href="agents.html">
+      <h2>Agent Cards</h2>
+      <p>Agent grid with status (busy/ready/idle). Feed-driven status detection. Preview text.</p>
+      <span class="tag">WebSocket</span> <span class="tag">REST</span>
+    </a>
+    <a class="card" href="peek.html">
+      <h2>Peek</h2>
+      <p>Terminal capture viewer. <code>GET /api/capture?target=...</code>. ANSI rendering.</p>
+      <span class="tag">REST</span>
+    </a>
+    <a class="card" href="send.html">
+      <h2>Send</h2>
+      <p>Send message to agent. <code>POST /api/send</code>. Delivery confirmation with lastLine.</p>
+      <span class="tag">REST</span>
+    </a>
+    <a class="card" href="workspace.html">
+      <h2>Workspace</h2>
+      <p>Federation workspace hub. Create, join, share agents across nodes.</p>
+      <span class="tag">REST</span> <span class="tag">WebSocket</span>
+    </a>
+  </div>
+</body>
+</html>

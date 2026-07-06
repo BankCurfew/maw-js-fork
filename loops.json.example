@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "loops": [
+    {
+      "id": "example-daily",
+      "oracle": "dev",
+      "tmux": "02-dev:0",
+      "schedule": "0 9 * * *",
+      "prompt": "daily standup check",
+      "requireIdle": true,
+      "enabled": false,
+      "description": "Example: daily standup at 9am"
+    }
+  ]
+}

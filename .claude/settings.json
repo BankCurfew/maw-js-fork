@@ -1,0 +1,94 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/curfew/.oracle/hooks/feed-activity.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ORACLE_NAME=Maw-js-Oracle bash ~/.oracle/hooks/safety-guardian.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__playwright",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ORACLE_NAME=Maw-js-Oracle bash ~/.oracle/hooks/playwright-limiter.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/curfew/.oracle/hooks/feed-activity.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__oracle-v2__arra_thread_update|mcp__oracle-v2__arra_thread|mcp__oracle-v2__arra_handoff",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/curfew/.oracle/hooks/auto-cc-bob.sh",
+            "statusMessage": "Auto-cc BoB..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__playwright",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ORACLE_NAME=Maw-js-Oracle bash ~/.oracle/hooks/playwright-release.sh"
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ORACLE_NAME=Maw-js-Oracle bash ~/.oracle/hooks/context-guardian.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/curfew/.oracle/hooks/feed-activity.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/curfew/.oracle/hooks/feed-activity.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

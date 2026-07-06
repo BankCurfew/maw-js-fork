@@ -1,0 +1,10 @@
+{
+  "name": "01-bob",
+  "windows": [
+    {
+      "name": "BoB-Oracle",
+      "repo": "YourOrg/BoB-Oracle"
+    }
+  ],
+  "sync_peers": []
+}

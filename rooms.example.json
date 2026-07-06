@@ -1,0 +1,29 @@
+[
+  {
+    "id": "command",
+    "label": "Command",
+    "emoji": "shield",
+    "description": "Mission control",
+    "lead": "BoB-Oracle",
+    "members": ["BoB-Oracle", "shell"],
+    "accent": "#6366f1"
+  },
+  {
+    "id": "engineering",
+    "label": "Engineering",
+    "emoji": "wrench",
+    "description": "Build and ship",
+    "lead": "Dev-Oracle",
+    "members": ["Dev-Oracle", "QA-Oracle"],
+    "accent": "#3b82f6"
+  },
+  {
+    "id": "studio",
+    "label": "Studio",
+    "emoji": "palette",
+    "description": "Design and content",
+    "lead": "Writer-Oracle",
+    "members": ["Writer-Oracle", "Designer-Oracle"],
+    "accent": "#f59e0b"
+  }
+]

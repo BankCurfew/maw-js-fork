@@ -1,0 +1,335 @@
+@import "tailwindcss";
+
+html, body, #root {
+  width: 100%;
+  min-width: 100vw;
+}
+body {
+  background: #020208;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans Thai', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  overflow-x: hidden;
+  /* Safe area for notched devices */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* All clickable elements show hand cursor + touch-friendly min size */
+button, [role="button"], a[href], summary { cursor: pointer; }
+@media (pointer: coarse) {
+  button, [role="button"] { min-height: 36px; }
+}
+
+/* Scrollbar — thinner on mobile */
+::-webkit-scrollbar { width: 4px; }
+@media (min-width: 640px) { ::-webkit-scrollbar { width: 6px; } }
+::-webkit-scrollbar-track { background: #020208; }
+::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
+
+/* Prevent horizontal overflow on mobile (skip fixed/absolute positioned elements) */
+body { overflow-x: hidden; }
+
+/* Shared */
+@keyframes agent-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* SVG chibi avatar animations */
+@keyframes saiyan-aura { 0% { r: 28; opacity: 0.5; } 50% { r: 40; opacity: 0.2; } 100% { r: 28; opacity: 0.5; } }
+@keyframes saiyan-outer { 0% { r: 38; opacity: 0.3; } 50% { r: 52; opacity: 0.08; } 100% { r: 38; opacity: 0.3; } }
+@keyframes typing-arm { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes float-code { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 0.7; } 80% { opacity: 0.7; } 100% { opacity: 0; transform: translateY(-30px); } }
+@keyframes sparkle { 0% { opacity: 0; transform: scale(0); } 50% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0); } }
+@keyframes room-pulse { 0%, 100% { stroke-opacity: 0.2; } 50% { stroke-opacity: 0.5; } }
+
+/* Chibi spin (busy avatars) */
+@keyframes chibi-spin {
+  0% { transform: scaleX(1); }
+  25% { transform: scaleX(0.15); }
+  50% { transform: scaleX(-1); }
+  75% { transform: scaleX(0.15); }
+  100% { transform: scaleX(1); }
+}
+
+/* Task detail overlay slide-in */
+@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.animate-slide-in-right { animation: slideInRight 0.2s ease-out; }
+
+/* Hover preview card */
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+/* Terminal modal slide up */
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* VS View */
+@keyframes toolCardIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes vsPulse { 0%, 100% { text-shadow: 0 0 8px rgba(251,191,36,0.4); } 50% { text-shadow: 0 0 20px rgba(251,191,36,0.8); } }
+
+/* Orbital View */
+@keyframes orbital-res { 0% { width: 90px; height: 90px; opacity: 0.6; } 100% { width: 220px; height: 220px; opacity: 0; } }
+@keyframes orbital-glow { 0%, 100% { box-shadow: 0 0 8px var(--tw-shadow-color, rgba(76,175,80,0.3)); } 50% { box-shadow: 0 0 20px var(--tw-shadow-color, rgba(76,175,80,0.6)); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Prevent iOS Safari auto-zoom on input focus */
+.xterm-helper-textarea,
+input, textarea, select {
+  font-size: 16px !important;
+}
+
+/* ============================================================
+   BoB Face — WALL-E Eyes (Designer Spec)
+   ============================================================ */
+
+:root {
+  /* BoB Eye Timing */
+  --bob-transition-shape: 200ms ease-in-out;
+  --bob-transition-color: 300ms ease-in-out;
+  --bob-transition-pupil: 150ms ease-out;
+
+  /* BoB Eye Sizes — fullscreen WALL-E binoculars (60-70% of viewport) */
+  --bob-eye-width: 25vmin;
+  --bob-eye-height: 30vmin;
+  --bob-eye-gap: 5vmin;
+  --bob-eye-radius: 4vmin;
+  --bob-pupil-size: 5vmin;
+
+  /* BoB Eye Colors (default = neutral purple) */
+  --bob-eye-bg: #a78bfa;
+  --bob-eye-glow: rgba(167, 139, 250, 0.4);
+  --bob-eye-glow-outer: rgba(167, 139, 250, 0.15);
+
+  /* BoB Breathe */
+  --bob-breathe-duration: 4s;
+  --bob-breathe-scale: 1.03;
+
+  /* BoB Face Container */
+  --bob-face-width: 80px;
+}
+
+/* --- Eye Base --- */
+.bob-eyes {
+  display: flex;
+  gap: var(--bob-eye-gap);
+  align-items: center;
+  justify-content: center;
+  animation: bob-breathe var(--bob-breathe-duration) ease-in-out infinite;
+}
+
+.bob-eye {
+  width: var(--bob-eye-width);
+  height: var(--bob-eye-height);
+  border-radius: var(--bob-eye-radius);
+  background: var(--bob-eye-bg);
+  box-shadow:
+    0 0 3vmin var(--bob-eye-glow),
+    0 0 6vmin var(--bob-eye-glow-outer);
+  position: relative;
+  overflow: hidden;
+  transition:
+    width var(--bob-transition-shape),
+    height var(--bob-transition-shape),
+    border-radius var(--bob-transition-shape),
+    background var(--bob-transition-color),
+    box-shadow var(--bob-transition-color),
+    transform var(--bob-transition-shape);
+}
+
+.bob-pupil {
+  width: var(--bob-pupil-size);
+  height: var(--bob-pupil-size);
+  border-radius: 50%;
+  background: #1a1a2e;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition:
+    width var(--bob-transition-shape),
+    height var(--bob-transition-shape),
+    top var(--bob-transition-pupil),
+    left var(--bob-transition-pupil);
+}
+
+/* --- Idle Breathing --- */
+@keyframes bob-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(var(--bob-breathe-scale)); }
+}
+
+/* --- Blink (neutral, working, happy only) --- */
+@keyframes bob-blink {
+  0%, 90%, 100% { height: var(--bob-eye-height, 30vmin); }
+  95% { height: 2vmin; border-radius: 1vmin; }
+}
+
+.bob-eyes[data-emotion="neutral"] .bob-eye,
+.bob-eyes[data-emotion="working"] .bob-eye,
+.bob-eyes[data-emotion="happy"] .bob-eye {
+  animation:
+    bob-blink 6s ease-in-out infinite,
+    bob-breathe var(--bob-breathe-duration) ease-in-out infinite;
+}
+
+/* ========== State 1: neutral ========== */
+.bob-eyes[data-emotion="neutral"] .bob-eye {
+  width: 25vmin; height: 30vmin; border-radius: 4vmin;
+  --bob-eye-bg: #a78bfa;
+  --bob-eye-glow: rgba(167, 139, 250, 0.4);
+  --bob-eye-glow-outer: rgba(167, 139, 250, 0.15);
+}
+.bob-eyes[data-emotion="neutral"] .bob-pupil {
+  width: 5vmin; height: 5vmin; top: 50%; left: 50%;
+}
+
+/* ========== State 2: thinking ========== */
+.bob-eyes[data-emotion="thinking"] .bob-eye {
+  width: 25vmin; height: 22vmin; border-radius: 3vmin;
+  --bob-eye-bg: #60a5fa;
+  --bob-eye-glow: rgba(96, 165, 250, 0.4);
+  --bob-eye-glow-outer: rgba(96, 165, 250, 0.15);
+}
+.bob-eyes[data-emotion="thinking"] .bob-pupil {
+  animation: bob-think-scan 1.2s ease-in-out infinite;
+}
+@keyframes bob-think-scan {
+  0%, 100% { left: 35%; }
+  50% { left: 65%; }
+}
+
+/* ========== State 3: happy ========== */
+.bob-eyes[data-emotion="happy"] .bob-eye {
+  width: 27vmin; height: 26vmin; border-radius: 6vmin;
+  --bob-eye-bg: #4ade80;
+  --bob-eye-glow: rgba(74, 222, 128, 0.4);
+  --bob-eye-glow-outer: rgba(74, 222, 128, 0.15);
+}
+.bob-eyes[data-emotion="happy"] .bob-pupil {
+  width: 4vmin; height: 4vmin;
+}
+.bob-eyes[data-emotion="happy"] {
+  animation: bob-happy-bounce 0.4s ease-out 1, bob-breathe var(--bob-breathe-duration) ease-in-out infinite;
+}
+@keyframes bob-happy-bounce {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-1.5vmin); }
+  100% { transform: translateY(0); }
+}
+
+/* ========== State 4: alert ========== */
+.bob-eyes[data-emotion="alert"] .bob-eye {
+  width: 22vmin; height: 34vmin; border-radius: 3vmin;
+  --bob-eye-bg: #fbbf24;
+  --bob-eye-glow: rgba(251, 191, 36, 0.5);
+  --bob-eye-glow-outer: rgba(251, 191, 36, 0.2);
+  animation: bob-alert-pulse 0.6s ease-in-out 2;
+}
+.bob-eyes[data-emotion="alert"] .bob-pupil {
+  width: 7vmin; height: 7vmin;
+}
+@keyframes bob-alert-pulse {
+  0%, 100% { box-shadow: 0 0 2vmin rgba(251, 191, 36, 0.5); }
+  50% { box-shadow: 0 0 4vmin rgba(251, 191, 36, 0.8), 0 0 8vmin rgba(251, 191, 36, 0.3); }
+}
+
+/* ========== State 5: confused ========== */
+.bob-eyes[data-emotion="confused"] .bob-eye--left {
+  width: 25vmin; height: 30vmin; border-radius: 4vmin;
+  transform: rotate(-12deg);
+  --bob-eye-bg: #a78bfa;
+  --bob-eye-glow: rgba(167, 139, 250, 0.4);
+}
+.bob-eyes[data-emotion="confused"] .bob-eye--right {
+  width: 25vmin; height: 26vmin; border-radius: 4vmin;
+  --bob-eye-bg: #a78bfa;
+  --bob-eye-glow: rgba(167, 139, 250, 0.4);
+}
+.bob-eyes[data-emotion="confused"] .bob-pupil {
+  left: 60%; top: 45%;
+}
+.bob-eyes[data-emotion="confused"] {
+  animation: bob-confused-wobble 1.5s ease-in-out infinite;
+}
+@keyframes bob-confused-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(2deg); }
+  75% { transform: rotate(-2deg); }
+}
+
+/* ========== State 6: working ========== */
+.bob-eyes[data-emotion="working"] .bob-eye {
+  width: 23vmin; height: 28vmin; border-radius: 3.5vmin;
+  --bob-eye-bg: #22d3ee;
+  --bob-eye-glow: rgba(34, 211, 238, 0.4);
+  --bob-eye-glow-outer: rgba(34, 211, 238, 0.15);
+  animation:
+    bob-blink 6s ease-in-out infinite,
+    bob-work-glow 2s ease-in-out infinite;
+}
+.bob-eyes[data-emotion="working"] .bob-pupil {
+  width: 4vmin; height: 4vmin;
+}
+@keyframes bob-work-glow {
+  0%, 100% { box-shadow: 0 0 2vmin rgba(34, 211, 238, 0.4); }
+  50% { box-shadow: 0 0 3vmin rgba(34, 211, 238, 0.6), 0 0 6vmin rgba(34, 211, 238, 0.2); }
+}
+
+/* ========== State 7: sleeping ========== */
+.bob-eyes[data-emotion="sleeping"] .bob-eye {
+  width: 25vmin; height: 2vmin; border-radius: 1vmin;
+  --bob-eye-bg: #6d5a8f;
+  --bob-eye-glow: rgba(109, 90, 143, 0.2);
+  --bob-eye-glow-outer: rgba(109, 90, 143, 0.1);
+}
+.bob-eyes[data-emotion="sleeping"] .bob-pupil {
+  display: none;
+}
+.bob-eyes[data-emotion="sleeping"] {
+  animation: bob-sleep-breathe 8s ease-in-out infinite;
+}
+@keyframes bob-sleep-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.02); opacity: 0.8; }
+}
+
+/* ========== State 8: error ========== */
+.bob-eyes[data-emotion="error"] .bob-eye {
+  width: 29vmin; height: 34vmin; border-radius: 3vmin;
+  --bob-eye-bg: #ef4444;
+  --bob-eye-glow: rgba(239, 68, 68, 0.6);
+  --bob-eye-glow-outer: rgba(239, 68, 68, 0.25);
+  animation: bob-error-flash 0.3s ease-in-out 2;
+}
+.bob-eyes[data-emotion="error"] .bob-pupil {
+  width: 8vmin; height: 8vmin;
+}
+@keyframes bob-error-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* --- Portrait Mode --- */
+@media (orientation: portrait) {
+  .bob-face {
+    width: 100vw !important;
+    height: 48px !important;
+    flex-direction: row !important;
+    padding: 0 16px;
+    justify-content: flex-start !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(42, 42, 58, 0.8);
+  }
+  .bob-eyes {
+    gap: 4px;
+    transform: scale(0.6);
+  }
+}
+
+/* --- Reduced Motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .bob-eye, .bob-pupil, .bob-eyes {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+}

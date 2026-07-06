@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agents — maw-js Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 2rem; }
+  h1 { color: #64b5f6; margin-bottom: 0.25rem; font-size: 1.3rem; }
+  .sub { color: #666; margin-bottom: 1rem; font-size: 0.85rem; }
+  .stats { color: #888; margin-bottom: 1rem; font-size: 0.85rem; }
+  .stats .busy { color: #ff9800; }
+  .stats .ready { color: #4caf50; }
+  .stats .idle { color: #666; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.75rem; }
+  .agent { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 1rem; transition: border-color 0.2s; }
+  .agent.busy { border-color: #ff9800; }
+  .agent.ready { border-color: #4caf50; }
+  .agent .name { font-weight: 600; font-size: 1rem; }
+  .agent .session { color: #666; font-size: 0.8rem; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-left: 0.5rem; text-transform: uppercase; }
+  .badge.busy { background: #3a2a00; color: #ff9800; }
+  .badge.ready { background: #1b3a1b; color: #4caf50; }
+  .badge.idle { background: #2a2a2a; color: #666; }
+  .preview { color: #888; font-size: 0.8rem; margin-top: 0.5rem; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { color: #666; font-size: 0.8rem; margin-top: 1rem; }
+  a { color: #64b5f6; }
+</style>
+</head>
+<body>
+  <h1>Agents</h1>
+  <p class="sub">Sessions + WebSocket feed → agent cards with live status</p>
+  <div id="root"></div>
+  <script type="module">
+    import React, { useState, useEffect, useRef } from 'https://esm.sh/react@19'
+    import { createRoot } from 'https://esm.sh/react-dom@19/client'
+    import htm from 'https://esm.sh/htm@3'
+    const html = htm.bind(React.createElement)
+
+    const API = location.origin
+    const WS_URL = location.origin.replace('http', 'ws') + '/ws'
+
+    const BUSY_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SubagentStart'])
+    const STOP_EVENTS = new Set(['Stop', 'SessionEnd', 'Notification'])
+
+    function App() {
+      const [agents, setAgents] = useState([])
+      const statusRef = useRef({}) // name → { status, lastSeen }
+      const wsRef = useRef(null)
+
+      // Load sessions
+      useEffect(() => {
+        async function load() {
+          const res = await fetch(API + '/api/sessions')
+          const data = await res.json()
+          const sessions = Array.isArray(data) ? data : data.sessions || []
+          const list = sessions.flatMap(s =>
+            (s.windows || []).map(w => ({
+              name: w.name,
+              target: s.name + ':' + w.index,
+              session: s.name,
+              active: w.active,
+              source: s.source || 'local',
+              status: statusRef.current[w.name]?.status || 'idle',
+              preview: statusRef.current[w.name]?.preview || '',
+            }))
+          )
+          setAgents(list)
+        }
+        load()
+        const t = setInterval(load, 5000)
+        return () => clearInterval(t)
+      }, [])
+
+      // WebSocket for feed → status
+      useEffect(() => {
+        function connect() {
+          const ws = new WebSocket(WS_URL)
+          wsRef.current = ws
+          ws.onclose = () => setTimeout(connect, 2000)
+          ws.onmessage = (e) => {
+            try {
+              const data = JSON.parse(e.data)
+              if (data.type === 'feed' || data.type === 'feed-history') {
+                const events = data.type === 'feed' ? [data.event] : data.events || []
+                for (const ev of events) {
+                  const name = ev.oracle
+                  // Match to agent: "neo" → "neo-oracle" or worktree derivation
+                  const wtMatch = (ev.project || '').match(/[.-]wt-(?:\d+-)?(.+)$/)
+                  const windowName = wtMatch ? name + '-' + wtMatch[1] : name + '-oracle'
+
+                  if (BUSY_EVENTS.has(ev.event)) {
+                    statusRef.current[windowName] = { status: 'busy', lastSeen: Date.now(), preview: ev.message || '' }
+                    statusRef.current[name] = statusRef.current[windowName]
+                  } else if (STOP_EVENTS.has(ev.event)) {
+                    statusRef.current[windowName] = { ...statusRef.current[windowName], status: 'ready' }
+                    statusRef.current[name] = statusRef.current[windowName]
+                  }
+                }
+                // Trigger re-render
+                setAgents(prev => prev.map(a => ({
+                  ...a,
+                  status: statusRef.current[a.name]?.status || statusRef.current[a.name.replace(/-oracle$/, '')]?.status || 'idle',
+                  preview: statusRef.current[a.name]?.preview || statusRef.current[a.name.replace(/-oracle$/, '')]?.preview || '',
+                })))
+              }
+            } catch {}
+          }
+        }
+        connect()
+        return () => wsRef.current?.close()
+      }, [])
+
+      const counts = { busy: 0, ready: 0, idle: 0 }
+      for (const a of agents) counts[a.status] = (counts[a.status] || 0) + 1
+
+      return html`
+        <div>
+          <div class="stats">
+            <span class="busy">● ${counts.busy} busy</span>
+            ${' · '}
+            <span class="ready">● ${counts.ready} ready</span>
+            ${' · '}
+            <span class="idle">● ${counts.idle} idle</span>
+            ${' · '}
+            ${agents.length} agents
+          </div>
+          <div class="grid">
+            ${agents.map(a => html`
+              <div class="agent ${a.status}" key=${a.target}>
+                <span class="name">${a.name}</span>
+                <span class="badge ${a.status}">${a.status}</span>
+                <div class="session">${a.session} · ${a.source}</div>
+                ${a.preview ? html`<div class="preview">${a.preview}</div>` : null}
+              </div>
+            `)}
+          </div>
+          <p class="meta"><a href="index.html">← back</a></p>
+        </div>
+      `
+    }
+
+    createRoot(document.getElementById('root')).render(html`<${App} />`)
+  </script>
+</body>
+</html>

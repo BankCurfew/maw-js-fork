@@ -1,0 +1,625 @@
+import { memo, useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { AgentAvatar } from "./AgentAvatar";
+import { HoverPreviewCard } from "./HoverPreviewCard";
+import { Joystick } from "./Joystick";
+import { OracleSearch } from "./OracleSearch";
+import { BottomStats } from "./BottomStats";
+import { FpsCounter } from "./FpsCounter";
+import { roomStyle, PREVIEW_CARD } from "../lib/constants";
+import type { AgentState, Session, AgentEvent } from "../lib/types";
+
+interface RoomConfig {
+  id: string; label: string; emoji: string; description: string;
+  lead: string; members: string[]; accent: string; floor: string; wall: string;
+}
+
+/** Normalize to base name: "Pulse-Oracle" / "Pulse Oracle" / "pulse" → "pulse" */
+function normalizeOracleName(name: string): string {
+  return name.toLowerCase().replace(/[-\s]?oracle$/i, "").replace(/[^a-z0-9]/g, "");
+}
+
+function matchAgentToRoom(agent: AgentState, memberName: string): boolean {
+  const a = agent.name.toLowerCase();
+  const m = memberName.toLowerCase();
+  return a === m || a === m.replace(/-oracle$/, "") || `${a}-oracle` === m
+    || normalizeOracleName(agent.name) === normalizeOracleName(memberName);
+}
+
+/** Only show real oracles in the Unassigned room — allowlist only, no regex fallback. */
+function isOracleAgent(agent: AgentState): boolean {
+  const name = agent.name.toLowerCase().replace(/[-\s]?oracle$/i, "").replace(/[^a-z0-9]/g, "");
+  return KNOWN_ORACLES.has(name);
+}
+
+const KNOWN_ORACLES = new Set([
+  "bob", "dev", "qa", "designer", "researcher", "writer", "hr", "aia",
+  "data", "admin", "botdev", "creator", "doccon", "editor", "security",
+]);
+interface MissionControlProps {
+  sessions: Session[];
+  agents: AgentState[];
+  connected: boolean;
+  send: (msg: object) => void;
+  onSelectAgent: (agent: AgentState) => void;
+  eventLog: AgentEvent[];
+  addEvent: (target: string, type: AgentEvent["type"], detail: string) => void;
+}
+
+export const MissionControl = memo(function MissionControl({
+  sessions,
+  agents,
+  connected,
+  send,
+  onSelectAgent,
+  eventLog,
+  addEvent,
+}: MissionControlProps) {
+  const [groupSolo, setGroupSolo] = useState(true);
+  const [roomsConfig, setRoomsConfig] = useState<RoomConfig[]>([]);
+  useEffect(() => {
+    fetch("/api/rooms").then(r => r.json()).then(d => {
+      if (d.rooms?.length > 0) setRoomsConfig(d.rooms);
+    }).catch(() => {});
+  }, []);
+  const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ agent: AgentState; room: { label: string; accent: string }; pos: { x: number; y: number } } | null>(null);
+  const [pinnedPreview, setPinnedPreview] = useState<{ agent: AgentState; room: { label: string; accent: string }; pos: { x: number; y: number }; svgX: number; svgY: number } | null>(null);
+  const pinnedByUser = useRef(false);
+  const hoverTimeout = useRef<ReturnType<typeof setTimeout>>();
+
+  const [showSearch, setShowSearch] = useState(false);
+
+  // Hide search when card is pinned
+  useEffect(() => {
+    if (pinnedPreview) setShowSearch(false);
+  }, [pinnedPreview]);
+
+  // Cmd+K or Ctrl+K to toggle search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowSearch((s) => !s);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 480;
+  const [zoom, setZoom] = useState(isMobile ? 1.6 : 1.1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Convert SVG coordinates to screen-relative position
+  const svgToScreen = useCallback((svgX: number, svgY: number): { x: number; y: number } => {
+    const svg = svgRef.current;
+    const container = containerRef.current;
+    if (!svg || !container) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = svgX;
+    pt.y = svgY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const screenPt = pt.matrixTransform(ctm);
+    const containerRect = container.getBoundingClientRect();
+    return {
+      x: screenPt.x - containerRect.left,
+      y: screenPt.y - containerRect.top,
+    };
+  }, []);
+
+  // side: "right" (default/hover), "left", or "auto" (prefer right, fallback left)
+  const calcCardPos = useCallback((svgX: number, svgY: number, side: "left" | "right" | "auto" = "auto") => {
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return { x: 0, y: 0 };
+    const screen = svgToScreen(svgX, svgY);
+    const cardW = PREVIEW_CARD.width;
+    const cardH = 500;
+    const rightX = screen.x + 60;
+    const leftX = screen.x - cardW - 40;
+    let x: number;
+    if (side === "right") {
+      x = rightX + cardW > containerRect.width ? leftX : rightX;
+    } else if (side === "left") {
+      x = leftX < 0 ? rightX : leftX;
+    } else {
+      x = rightX + cardW > containerRect.width ? leftX : rightX;
+    }
+    const y = Math.max(10, Math.min(screen.y - 290, containerRect.height - cardH - 20));
+    return { x, y };
+  }, [svgToScreen]);
+
+  // Show preview card on hover — anchored to agent's SVG position (skip when pinned)
+  const showPreview = useCallback((agent: AgentState, room: { label: string; accent: string }, svgX: number, svgY: number) => {
+    if (pinnedPreview) return;
+    clearTimeout(hoverTimeout.current);
+    const pos = calcCardPos(svgX, svgY);
+    setHoverPreview({ agent, room, pos });
+  }, [calcCardPos, pinnedPreview]);
+
+  const hidePreview = useCallback(() => {
+    hoverTimeout.current = setTimeout(() => setHoverPreview(null), 300);
+  }, []);
+
+  const keepPreview = useCallback(() => {
+    clearTimeout(hoverTimeout.current);
+  }, []);
+
+  // Pan with middle mouse or drag
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1 || e.button === 0 && e.shiftKey) {
+      e.preventDefault();
+      setIsPanning(true);
+      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    }
+  }, [pan]);
+
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning) return;
+    const dx = e.clientX - panStart.current.x;
+    const dy = e.clientY - panStart.current.y;
+    setPan({ x: panStart.current.panX + dx / zoom, y: panStart.current.panY + dy / zoom });
+  }, [isPanning, zoom]);
+
+  const onMouseUp = useCallback(() => setIsPanning(false), []);
+
+  const resetView = useCallback(() => { setZoom(1.1); setPan({ x: 0, y: 0 }); }, []);
+
+  const onJoystickPan = useCallback((dx: number, dy: number) => {
+    setPan(p => ({ x: p.x + dx, y: p.y + dy }));
+  }, []);
+
+  // Group agents by session (fallback)
+  const sessionAgents = useMemo(() => {
+    const map = new Map<string, AgentState[]>();
+    for (const a of agents) {
+      const arr = map.get(a.session) || [];
+      arr.push(a);
+      map.set(a.session, arr);
+    }
+    return map;
+  }, [agents]);
+
+  // Layout: use rooms config if available, else group by tmux session
+  const layout = useMemo(() => {
+    type LayoutItem = {
+      session: { name: string; windows: any[] };
+      agents: AgentState[];
+      style: { accent: string; floor: string; wall: string; label: string };
+    };
+
+    let virtual: LayoutItem[];
+
+    if (roomsConfig.length > 0) {
+      // Use rooms config for grouping
+      const assigned = new Set<string>();
+      virtual = roomsConfig.map(room => {
+        const roomAgents: AgentState[] = [];
+        for (const memberName of room.members) {
+          const agent = agents.find(a => matchAgentToRoom(a, memberName));
+          if (agent) { roomAgents.push(agent); assigned.add(agent.target); }
+        }
+        return {
+          session: { name: room.id, windows: [] },
+          agents: roomAgents,
+          style: { accent: room.accent, floor: room.floor, wall: room.wall, label: room.label },
+        };
+      });
+      // Unassigned agents (only real oracles)
+      const unassigned = agents.filter(a => !assigned.has(a.target) && isOracleAgent(a));
+      if (unassigned.length > 0) {
+        virtual.push({
+          session: { name: "_unassigned", windows: [] },
+          agents: unassigned,
+          style: { accent: "#78909c", floor: "#1a1a1e", wall: "#121216", label: "Unassigned" },
+        });
+      }
+    } else {
+      // Fallback: group by tmux session
+      const sessionList = sessions.map((s) => ({
+        session: s,
+        agents: sessionAgents.get(s.name) || [],
+        style: roomStyle(s.name),
+      }));
+
+      if (groupSolo) {
+        const multi = sessionList.filter(s => s.agents.length > 1);
+        const soloAgents = sessionList.filter(s => s.agents.length === 1).flatMap(s => s.agents);
+        virtual = [];
+        if (soloAgents.length > 0) {
+          virtual.push({
+            session: { name: "_oracles", windows: [] },
+            agents: soloAgents,
+            style: { accent: "#7e57c2", floor: "#1a1428", wall: "#120e1e", label: "Oracles" },
+          });
+        }
+        virtual.push(...multi);
+      } else {
+        virtual = sessionList;
+      }
+    }
+
+    const cx = 640, cy = 460;
+    const radius = Math.min(370, 160 + virtual.length * 28);
+
+    return virtual.map((s, i) => {
+      const angle = (i / virtual.length) * Math.PI * 2 - Math.PI / 2;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      return { ...s, x, y };
+    });
+  }, [sessions, sessionAgents, groupSolo, roomsConfig, agents]);
+
+  // Persistent input buffer per agent (survives pin/unpin)
+  const [inputBufs, setInputBufs] = useState<Record<string, string>>({});
+  const getInputBuf = useCallback((target: string) => inputBufs[target] || "", [inputBufs]);
+  const setInputBuf = useCallback((target: string, val: string) => {
+    setInputBufs(prev => ({ ...prev, [target]: val }));
+  }, []);
+
+  // Click agent -> pin preview card
+  const onAgentClick = useCallback(
+    (agent: AgentState, svgX: number, svgY: number, room: { label: string; accent: string }) => {
+      if (pinnedPreview) {
+        addEvent(agent.target, "command", `clicked ${agent.name}`);
+        return;
+      }
+      const pos = calcCardPos(svgX, svgY);
+      pinnedByUser.current = true;
+      setPinnedPreview({ agent, room, pos, svgX, svgY });
+      setHoverPreview(null);
+      send({ type: "subscribe", target: agent.target });
+    },
+    [calcCardPos, send, pinnedPreview, addEvent]
+  );
+
+  // Fullscreen -> close pin first, then open modal
+  const onPinnedFullscreen = useCallback(() => {
+    if (pinnedPreview) {
+      const agent = pinnedPreview.agent;
+      setPinnedPreview(null);
+      setTimeout(() => onSelectAgent(agent), 150);
+    }
+  }, [pinnedPreview, onSelectAgent]);
+
+  const onPinnedClose = useCallback(() => {
+    setPinnedPreview(null);
+  }, []);
+
+  const pinnedRef = useRef<HTMLDivElement>(null);
+
+  // Animate pinned card from hover position to center
+  const [pinnedAnimPos, setPinnedAnimPos] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (pinnedPreview) {
+      setPinnedAnimPos({ left: pinnedPreview.pos.x, top: pinnedPreview.pos.y });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const containerW = containerRef.current?.getBoundingClientRect().width || 800;
+          setPinnedAnimPos({ left: (containerW - PREVIEW_CARD.width) / 2, top: 20 });
+        });
+      });
+    } else {
+      setPinnedAnimPos(null);
+    }
+  }, [pinnedPreview]);
+
+  // Click outside pinned card to close
+  useEffect(() => {
+    if (!pinnedPreview) return;
+    const handler = (e: MouseEvent) => {
+      if (pinnedRef.current && !pinnedRef.current.contains(e.target as Node)) {
+        setPinnedPreview(null);
+      }
+    };
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 50);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [pinnedPreview]);
+
+  // Build lookup: agent target -> { svgX, svgY, room style }
+  const agentPositions = useMemo(() => {
+    const map = new Map<string, { svgX: number; svgY: number; style: ReturnType<typeof roomStyle> }>();
+    for (const s of layout) {
+      const count = s.agents.length;
+      s.agents.forEach((agent, ai) => {
+        const angle = (ai / Math.max(1, count)) * Math.PI * 2 - Math.PI / 2;
+        const r = count === 1 ? 0 : Math.min(Math.max(70, 35 + count * 18) - 35, 35 + count * 6);
+        map.set(agent.target, {
+          svgX: s.x + Math.cos(angle) * r,
+          svgY: s.y + Math.sin(angle) * r,
+          style: s.style,
+        });
+      });
+    }
+    return map;
+  }, [layout]);
+
+  // Compute viewBox based on zoom and pan
+  const vbW = 1200 / zoom;
+  const vbH = 1000 / zoom;
+  const vbX = (1200 - vbW) / 2 - pan.x;
+  const vbY = (1000 - vbH) / 2 - pan.y;
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full overflow-hidden"
+      style={{ background: "#020208", height: "calc(100vh - 60px)", cursor: isPanning ? "grabbing" : "default" }}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
+      {/* SVG Mission Control */}
+      <svg
+        ref={svgRef}
+        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+        className="w-full h-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <radialGradient id="mc-bg-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#1a1a3e" stopOpacity={0.3} />
+            <stop offset="100%" stopColor="#020208" stopOpacity={0} />
+          </radialGradient>
+          <filter id="mc-glow">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8" />
+          </filter>
+        </defs>
+
+        {/* Background glow */}
+        <circle cx={600} cy={500} r={500} fill="url(#mc-bg-glow)" />
+
+        {/* Grid lines */}
+        {Array.from({ length: 13 }, (_, i) => (
+          <line key={`vl-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={1000}
+            stroke="#ffffff" strokeWidth={0.3} opacity={0.03} />
+        ))}
+        {Array.from({ length: 11 }, (_, i) => (
+          <line key={`hl-${i}`} x1={0} y1={i * 100} x2={1200} y2={i * 100}
+            stroke="#ffffff" strokeWidth={0.3} opacity={0.03} />
+        ))}
+
+        {/* Orbital rings */}
+        <circle cx={600} cy={500} r={150} fill="none" stroke="#26c6da" strokeWidth={0.5} opacity={0.08}
+          strokeDasharray="4 8" />
+        <circle cx={600} cy={500} r={300} fill="none" stroke="#7e57c2" strokeWidth={0.5} opacity={0.06}
+          strokeDasharray="6 12" />
+        <circle cx={600} cy={500} r={450} fill="none" stroke="#ffa726" strokeWidth={0.5} opacity={0.04}
+          strokeDasharray="8 16" />
+
+        {/* Center hub */}
+        <circle cx={600} cy={500} r={45} fill="none" stroke="#26c6da" strokeWidth={1} opacity={0.15} />
+        <circle cx={600} cy={500} r={7} fill="#26c6da" opacity={0.4} />
+        <text x={600} y={468} textAnchor="middle" fill="#26c6da" fontSize={12} opacity={0.5}
+          fontFamily="'SF Mono', monospace" letterSpacing={5}>MISSION CONTROL</text>
+
+        {/* Connection lines from hub to sessions */}
+        {layout.map((s) => (
+          <line key={`line-${s.session.name}`}
+            x1={600} y1={500} x2={s.x} y2={s.y}
+            stroke={s.style.accent} strokeWidth={0.5} opacity={0.08}
+            strokeDasharray="2 6"
+          />
+        ))}
+
+        {/* Session clusters */}
+        {layout.map((s) => {
+          const agentCount = s.agents.length;
+          const clusterRadius = Math.max(70, 35 + agentCount * 18);
+          const hasBusy = s.agents.some((a) => a.status === "busy");
+
+          return (
+            <g key={s.session.name}>
+              {/* Session zone */}
+              <circle cx={s.x} cy={s.y} r={clusterRadius}
+                fill={`${s.style.floor}cc`}
+                stroke={s.style.accent}
+                strokeWidth={hasBusy ? 1.5 : 0.5}
+                opacity={hasBusy ? 0.8 : 0.4}
+                style={hasBusy ? { animation: "room-pulse 2s ease-in-out infinite" } : {}}
+              />
+
+              {/* Session label */}
+              <text
+                x={s.x} y={s.y - clusterRadius - 12}
+                textAnchor="middle"
+                fill={s.style.accent}
+                fontSize={isMobile ? 16 : 13}
+                fontWeight="bold"
+                fontFamily="'SF Mono', monospace"
+                letterSpacing={3}
+                opacity={0.8}
+              >
+                {s.style.label.toUpperCase()}
+              </text>
+
+              {/* Agent count badge */}
+              <text
+                x={s.x} y={s.y + clusterRadius + 18}
+                textAnchor="middle"
+                fill={s.style.accent}
+                fontSize={isMobile ? 13 : 10}
+                fontFamily="'SF Mono', monospace"
+                opacity={0.6}
+              >
+                {agentCount} agent{agentCount !== 1 ? "s" : ""}
+              </text>
+
+              {/* Agents within cluster */}
+              {s.agents.map((agent, ai) => {
+                const agentAngle = (ai / Math.max(1, agentCount)) * Math.PI * 2 - Math.PI / 2;
+                const agentRadius = agentCount === 1 ? 0 : Math.min(clusterRadius - 35, 35 + agentCount * 6);
+                const ax = s.x + Math.cos(agentAngle) * agentRadius;
+                const ay = s.y + Math.sin(agentAngle) * agentRadius;
+                const isHovered = hoveredAgent === agent.target;
+                const scale = isHovered ? 1.4 : 0.65;
+
+                return (
+                  <g key={agent.target} transform={`translate(${ax}, ${ay})`}
+                    style={{ zIndex: isHovered ? 999 : 0 }}
+                  >
+                    {/* Hover backdrop glow */}
+                    {isHovered && (
+                      <circle cx={0} cy={-5} r={55} fill={s.style.accent} opacity={0.08} />
+                    )}
+                    <g
+                      transform={`scale(${scale})`}
+                      onMouseEnter={() => {
+                        setHoveredAgent(agent.target);
+                        showPreview(agent, { label: s.style.label, accent: s.style.accent }, ax, ay);
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredAgent(null);
+                        hidePreview();
+                      }}
+                      style={{ transition: "transform 0.15s ease-out" }}
+                    >
+                      <AgentAvatar
+                        name={agent.name}
+                        target={agent.target}
+                        status={agent.status}
+                        preview={agent.preview}
+                        accent={s.style.accent}
+                        onClick={() => onAgentClick(agent, ax, ay, { label: s.style.label, accent: s.style.accent })}
+                      />
+                    </g>
+                    {/* Agent name (below) */}
+                    <text
+                      y={28}
+                      textAnchor="middle"
+                      fill={isHovered ? s.style.accent : "#ffffff"}
+                      fontSize={isHovered ? (isMobile ? 14 : 11) : (isMobile ? 12 : 9)}
+                      fontFamily="'SF Mono', monospace"
+                      opacity={isHovered ? 1 : 0.7}
+                      style={{ transition: "all 0.2s", cursor: "pointer" }}
+                      onClick={() => onAgentClick(agent, ax, ay, { label: s.style.label, accent: s.style.accent })}
+                    >
+                      {agent.name.replace(/-oracle$/, "").replace(/-/g, " ")}
+                    </text>
+
+                    {/* Hover tooltip — hidden when preview card is showing */}
+                    {isHovered && !hoverPreview && (
+                      <g>
+                        <rect x={-100} y={-65} width={200} height={34} rx={8}
+                          fill="rgba(8,8,16,0.95)" stroke={s.style.accent} strokeWidth={0.8} opacity={0.95} />
+                        {agent.preview && (
+                          <text x={0} y={-48} textAnchor="middle" fill="#e0e0e0" fontSize={9}
+                            fontFamily="'SF Mono', monospace">
+                            {agent.preview.slice(0, 35)}
+                          </text>
+                        )}
+                        <text x={0} y={-38} textAnchor="middle" fill={s.style.accent} fontSize={8}
+                          fontFamily="'SF Mono', monospace" opacity={0.7}>
+                          {agent.status} · {agent.target}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Controls — bottom right: pan + zoom + group toggle */}
+      <div className="absolute bottom-14 sm:bottom-4 right-3 sm:right-6 flex flex-col items-center gap-1">
+        <button
+          onClick={() => setGroupSolo(g => !g)}
+          className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur border border-white/10 text-[9px] text-white/50 hover:text-white hover:bg-white/10 cursor-pointer font-mono"
+          title={groupSolo ? "Show all rooms" : "Group solo oracles"}
+        >
+          {groupSolo ? "G" : "A"}
+        </button>
+        <div className="w-6 border-t border-white/[0.06] my-0.5" />
+        <Joystick onPan={onJoystickPan} />
+        <div className="w-6 border-t border-white/[0.06] my-0.5" />
+        <button onClick={() => setZoom((z) => Math.min(3, z + 0.05))}
+          className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-lg font-bold cursor-pointer">+</button>
+        <button onClick={resetView}
+          className="w-8 h-6 rounded-lg bg-black/50 backdrop-blur border border-white/10 text-[9px] text-white/50 hover:text-white hover:bg-white/10 cursor-pointer font-mono">
+          {Math.round(zoom * 100)}%
+        </button>
+        <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.05))}
+          className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur border border-white/10 text-white/70 hover:text-white hover:bg-white/10 text-lg font-bold cursor-pointer">−</button>
+      </div>
+
+      {/* Hover Preview Card — manual hover (hidden when pinned) */}
+      {hoverPreview && !pinnedPreview && (
+        <div
+          className="absolute z-30 pointer-events-auto"
+          style={{
+            left: hoverPreview.pos.x,
+            top: hoverPreview.pos.y,
+            maxWidth: PREVIEW_CARD.width,
+            animation: "fadeSlideIn 0.15s ease-out",
+          }}
+          onMouseEnter={keepPreview}
+          onMouseLeave={hidePreview}
+        >
+          <HoverPreviewCard
+            agent={hoverPreview.agent}
+            roomLabel={hoverPreview.room.label}
+            accent={hoverPreview.room.accent}
+          />
+        </div>
+      )}
+
+      {/* Pinned Preview Card — bottom sheet on mobile, slides to center on desktop */}
+      {pinnedPreview && pinnedAnimPos && (
+        <div
+          ref={pinnedRef}
+          className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto z-40 pointer-events-auto sm:rounded-none rounded-t-2xl"
+          style={{
+            left: isMobile ? 0 : pinnedAnimPos.left,
+            top: isMobile ? undefined : pinnedAnimPos.top,
+            maxWidth: isMobile ? "100%" : PREVIEW_CARD.width,
+            maxHeight: isMobile ? "85vh" : undefined,
+            overflowY: isMobile ? "auto" : undefined,
+            transition: "left 0.3s ease-out, top 0.3s ease-out",
+          }}
+        >
+          <HoverPreviewCard
+            agent={pinnedPreview.agent}
+            roomLabel={pinnedPreview.room.label}
+            accent={pinnedPreview.room.accent}
+            pinned
+            send={send}
+            onFullscreen={onPinnedFullscreen}
+            onClose={onPinnedClose}
+            eventLog={eventLog}
+            addEvent={addEvent}
+            externalInputBuf={getInputBuf(pinnedPreview.agent.target)}
+            onInputBufChange={(val) => setInputBuf(pinnedPreview.agent.target, val)}
+          />
+        </div>
+      )}
+
+      {/* Search button — bottom left */}
+      <button
+        onClick={() => setShowSearch(true)}
+        className="absolute bottom-14 sm:bottom-4 left-3 sm:left-6 flex items-center gap-2 px-3 py-2 rounded-xl bg-black/50 backdrop-blur border border-white/10 text-white/50 hover:text-[#64b5f6] hover:border-[#64b5f6]/30 cursor-pointer transition-all z-20"
+        title="Search Oracle (⌘K)"
+      >
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+          <circle cx={11} cy={11} r={8} />
+          <line x1={21} y1={21} x2={16.65} y2={16.65} />
+        </svg>
+        <span className="text-[10px] font-mono">Oracle</span>
+        <kbd className="text-[8px] text-white/20 ml-1">⌘K</kbd>
+      </button>
+
+      {/* Oracle Search overlay */}
+      {showSearch && <OracleSearch onClose={() => setShowSearch(false)} />}
+
+      {/* Bottom stats + FPS */}
+      <BottomStats agents={agents} />
+      <FpsCounter />
+    </div>
+  );
+});

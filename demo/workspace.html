@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workspace — maw-js Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; }
+  h1 { color: #64b5f6; margin-bottom: 0.25rem; font-size: 1.3rem; }
+  .sub { color: #666; margin-bottom: 1rem; font-size: 0.85rem; }
+  h2 { color: #4fc3f7; font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+  .section { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+  .row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+  input, button { background: #1a1a2e; color: #e0e0e0; border: 1px solid #333; padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.85rem; }
+  input { flex: 1; }
+  button { background: #1e3a5f; color: #64b5f6; border-color: #64b5f6; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #264d73; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+  .badge.ok { background: #1b3a1b; color: #4caf50; }
+  .badge.err { background: #3a1b1b; color: #f44336; }
+  .badge.info { background: #1e3a5f; color: #64b5f6; }
+  .log { font-family: monospace; font-size: 0.8rem; color: #888; padding: 0.25rem 0; border-bottom: 1px solid #1a1a2e; }
+  .log .ts { color: #555; }
+  .log .type { color: #4fc3f7; }
+  .node { display: inline-block; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 0.3rem 0.6rem; margin: 0.2rem; font-size: 0.8rem; }
+  .agent { display: inline-block; background: #0d0d1a; border: 1px solid #333; border-radius: 6px; padding: 0.3rem 0.6rem; margin: 0.2rem; font-size: 0.8rem; }
+  .agent .name { color: #4fc3f7; }
+  .agent .node { color: #666; font-size: 0.75rem; border: none; background: none; padding: 0; margin: 0; }
+  .result { color: #4caf50; font-size: 0.85rem; margin-top: 0.5rem; }
+  .error { color: #f44336; font-size: 0.85rem; margin-top: 0.5rem; }
+  .meta { color: #666; font-size: 0.8rem; margin-top: 1rem; }
+  a { color: #64b5f6; }
+  .empty { color: #555; font-style: italic; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+  <h1>Workspace Hub</h1>
+  <p class="sub">Federation workspace — create, join, share agents across nodes</p>
+  <div id="root"></div>
+  <script type="module">
+    import React, { useState } from 'https://esm.sh/react@19'
+    import { createRoot } from 'https://esm.sh/react-dom@19/client'
+    import htm from 'https://esm.sh/htm@3'
+    const html = htm.bind(React.createElement)
+
+    const API = location.origin
+
+    function App() {
+      const [wsName, setWsName] = useState('')
+      const [nodeId, setNodeId] = useState(location.hostname)
+      const [joinCode, setJoinCode] = useState('')
+      const [workspace, setWorkspace] = useState(null) // { id, token, name }
+      const [agents, setAgents] = useState([])
+      const [feed, setFeed] = useState([])
+      const [status, setStatus] = useState(null)
+      const [log, setLog] = useState([])
+
+      function addLog(msg, ok = true) {
+        setLog(prev => [{ msg, ok, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 30))
+      }
+
+      async function doCreate() {
+        if (!wsName.trim() || !nodeId.trim()) return
+        try {
+          const res = await fetch(API + '/api/workspace/create', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: wsName.trim(), nodeId: nodeId.trim() }),
+          })
+          const data = await res.json()
+          if (data.error) { addLog(data.error, false); return }
+          setWorkspace({ id: data.id, token: data.token, name: wsName.trim() })
+          setJoinCode(data.joinCode)
+          addLog('Created workspace: ' + data.id + ' (code: ' + data.joinCode + ')')
+        } catch (e) { addLog(e.message, false) }
+      }
+
+      async function doJoin() {
+        if (!joinCode.trim() || !nodeId.trim()) return
+        try {
+          const res = await fetch(API + '/api/workspace/join', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: joinCode.trim(), nodeId: nodeId.trim() }),
+          })
+          const data = await res.json()
+          if (data.error) { addLog(data.error, false); return }
+          setWorkspace({ id: data.workspaceId, token: data.token, name: data.name })
+          addLog('Joined workspace: ' + data.name)
+        } catch (e) { addLog(e.message, false) }
+      }
+
+      // HMAC-signed requests not practical from browser (token in memory only)
+      // These demo endpoints show the API shape — real auth needs server-side signing
+
+      async function loadStatus() {
+        if (!workspace) return
+        addLog('Status requires HMAC auth — showing workspace info from create/join')
+        setStatus({ id: workspace.id, name: workspace.name, note: 'Full status requires HMAC-signed request' })
+      }
+
+      const fmt = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour12: false })
+
+      return html`
+        <div>
+          <h2>Create Workspace</h2>
+          <div class="section">
+            <div class="row">
+              <input value=${wsName} onChange=${e => setWsName(e.target.value)} placeholder="Workspace name" />
+              <input value=${nodeId} onChange=${e => setNodeId(e.target.value)} placeholder="Node ID" style=${{ maxWidth: '150px' }} />
+              <button onClick=${doCreate}>Create</button>
+            </div>
+          </div>
+
+          <h2>Join Workspace</h2>
+          <div class="section">
+            <div class="row">
+              <input value=${joinCode} onChange=${e => setJoinCode(e.target.value)} placeholder="Join code (e.g. ABC123)" style=${{ maxWidth: '200px', textTransform: 'uppercase', letterSpacing: '2px' }} />
+              <input value=${nodeId} onChange=${e => setNodeId(e.target.value)} placeholder="Node ID" style=${{ maxWidth: '150px' }} />
+              <button onClick=${doJoin}>Join</button>
+            </div>
+          </div>
+
+          ${workspace ? html`
+            <h2>Active: ${workspace.name}</h2>
+            <div class="section">
+              <div style=${{ marginBottom: '0.5rem' }}>
+                <span class="badge info">${workspace.id}</span>
+                ${joinCode ? html` <span class="badge ok">Code: ${joinCode}</span>` : null}
+              </div>
+              <div style=${{ fontSize: '0.8rem', color: '#666' }}>
+                Token: ${workspace.token.slice(0, 12)}...
+              </div>
+              <div style=${{ marginTop: '0.5rem' }}>
+                <button onClick=${loadStatus}>Status</button>
+              </div>
+              ${status ? html`
+                <div style=${{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#888' }}>
+                  ${JSON.stringify(status, null, 2)}
+                </div>
+              ` : null}
+            </div>
+          ` : null}
+
+          <h2>API Reference</h2>
+          <div class="section">
+            <div class="log"><span class="type">POST</span> /api/workspace/create <span class="ts">{ name, nodeId } → { id, token, joinCode }</span></div>
+            <div class="log"><span class="type">POST</span> /api/workspace/join <span class="ts">{ code, nodeId } → { workspaceId, token, name }</span></div>
+            <div class="log"><span class="type">POST</span> /api/workspace/:id/agents <span class="ts">{ name, nodeId } → HMAC required</span></div>
+            <div class="log"><span class="type">GET </span> /api/workspace/:id/agents <span class="ts">→ HMAC required</span></div>
+            <div class="log"><span class="type">GET </span> /api/workspace/:id/status <span class="ts">→ HMAC required</span></div>
+            <div class="log"><span class="type">GET </span> /api/workspace/:id/feed <span class="ts">→ HMAC required</span></div>
+            <div class="log"><span class="type">POST</span> /api/workspace/:id/message <span class="ts">{ from, to?, text } → HMAC required</span></div>
+          </div>
+
+          ${log.length > 0 ? html`
+            <h2>Log</h2>
+            <div class="section">
+              ${log.map((l, i) => html`
+                <div class="log" key=${i}>
+                  <span class="ts">${l.ts}</span>
+                  ${' '}
+                  <span class="badge ${l.ok ? 'ok' : 'err'}">${l.ok ? 'ok' : 'err'}</span>
+                  ${' ' + l.msg}
+                </div>
+              `)}
+            </div>
+          ` : null}
+
+          <p class="meta"><a href="index.html">← back</a></p>
+        </div>
+      `
+    }
+
+    createRoot(document.getElementById('root')).render(html`<${App} />`)
+  </script>
+</body>
+</html>

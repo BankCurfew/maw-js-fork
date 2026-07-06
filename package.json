@@ -1,0 +1,44 @@
+{
+  "name": "maw",
+  "version": "1.1.0",
+  "type": "module",
+  "bin": {
+    "maw": "./src/cli.ts"
+  },
+  "scripts": {
+    "build:office": "cd office && bunx vite build --base / --outDir ../dist-office --emptyOutDir",
+    "build:cf": "cd office && bunx vite build --base / --outDir ../dist-cf",
+    "deploy:cf": "bun run build:cf && bunx wrangler deploy",
+    "dev": "pm2 start ecosystem.config.cjs && echo '→ maw backend (watch src/) on :3456\n→ maw-dev vite HMR on :5173\n→ pm2 logs to follow'",
+    "dev:office": "cd $HOME/repos/github.com/YourOrg/office-v2 && bunx vite",
+    "dev:stop": "pm2 delete maw maw-dev 2>/dev/null; echo '→ dev stopped'",
+    "apply-config": "pm2 delete maw maw-bob maw-syslog 2>/dev/null; pm2 start ecosystem.config.cjs --only maw --only maw-bob --only maw-syslog && pm2 save",
+    "deploy": "bun install && bun run build:office && pm2 delete maw maw-dev 2>/dev/null; pm2 start ecosystem.config.cjs --only maw && pm2 save",
+    "build:8bit": "cd office-8bit && bash build.sh",
+    "deploy:remote": "bun run build:office && rsync -az dist-office/ white.local:~/Code/github.com/YourOrg/maw-js/dist-office/ && rsync -az dist-8bit-office/ white.local:~/Code/github.com/YourOrg/maw-js/dist-8bit-office/ && rsync -az src/ white.local:~/Code/github.com/YourOrg/maw-js/src/ && ssh white.local 'export PATH=$HOME/.bun/bin:$PATH && pm2 restart maw' && echo '→ deployed to white.local:3456'"
+  },
+  "description": "maw.js — Multi-Agent Workflow in Bun/TS. Remote tmux orchestra control. CLI + Web UI.",
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^5.5.0",
+    "hono": "^4.12.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.183.2",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^4.3.0",
+    "bun-types": "^1.3.14",
+    "tailwindcss": "^4.2.1",
+    "typescript": "5.8",
+    "vite": "^6.0.0"
+  }
+}

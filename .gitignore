@@ -1,0 +1,51 @@
+node_modules/
+node_modules_root/
+dist-office/
+maw.config.json
+.mcp.json
+ui-state.json
+rooms.json
+
+# Bun global link artifacts
+~/
+fleet/*.json
+!fleet/*.example.json
+
+# Runtime data
+attachments/
+auth.json
+loops.json
+loops-log.json
+asks.json
+
+# Backups
+fleet.bak.*/
+fleet.rooms.*/
+dist-office.bak-*/
+*.config.json.bak*
+*.config.json.backup
+
+# gmail-mcp is now committed — NEVER ignore it again (lost in HQ migration)
+!gmail-mcp/
+gmail-mcp/node_modules/
+
+# Build artifacts
+dist/
+
+# Dev build (office/dist is dev mode, dist-office is prod)
+office/dist/
+
+# Settings backups
+.claude/*.bak*
+
+# Playwright
+.playwright-cli/
+.playwright-mcp/
+
+# Psi (personal workspace)
+ψ/
+
+# Fork exclusions
+docs/
+gmail-mcp/
+ui/

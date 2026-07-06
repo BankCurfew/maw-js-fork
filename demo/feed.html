@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Feed — maw-js Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; }
+  h1 { color: #64b5f6; margin-bottom: 0.25rem; font-size: 1.3rem; }
+  .sub { color: #666; margin-bottom: 1rem; font-size: 0.85rem; }
+  .status { padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem; }
+  .status.connected { background: #1b3a1b; color: #4caf50; }
+  .status.disconnected { background: #3a1b1b; color: #f44336; }
+  .event { background: #1a1a2e; border-left: 3px solid #333; padding: 0.5rem 0.75rem; margin-bottom: 4px; font-size: 0.85rem; border-radius: 0 4px 4px 0; }
+  .event .oracle { color: #4fc3f7; font-weight: 600; }
+  .event .type { color: #aaa; font-size: 0.75rem; margin-left: 0.5rem; }
+  .event .time { color: #555; font-size: 0.75rem; float: right; }
+  .event .msg { color: #ccc; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .event[data-type="PreToolUse"] { border-left-color: #ff9800; }
+  .event[data-type="PostToolUse"] { border-left-color: #4caf50; }
+  .event[data-type="Stop"] { border-left-color: #9e9e9e; }
+  .event[data-type="UserPromptSubmit"] { border-left-color: #64b5f6; }
+  .event[data-type="Notification"] { border-left-color: #f44336; }
+  .meta { color: #666; font-size: 0.8rem; margin-top: 1rem; }
+  a { color: #64b5f6; }
+</style>
+</head>
+<body>
+  <h1>Live Feed</h1>
+  <p class="sub">WebSocket → feed events in real-time</p>
+  <div id="root"></div>
+  <script type="module">
+    import React, { useState, useEffect, useRef } from 'https://esm.sh/react@19'
+    import { createRoot } from 'https://esm.sh/react-dom@19/client'
+    import htm from 'https://esm.sh/htm@3'
+    const html = htm.bind(React.createElement)
+
+    const WS_URL = location.origin.replace('http', 'ws') + '/ws'
+
+    function App() {
+      const [events, setEvents] = useState([])
+      const [connected, setConnected] = useState(false)
+      const [count, setCount] = useState(0)
+      const wsRef = useRef(null)
+
+      useEffect(() => {
+        function connect() {
+          const ws = new WebSocket(WS_URL)
+          wsRef.current = ws
+          ws.onopen = () => setConnected(true)
+          ws.onclose = () => { setConnected(false); setTimeout(connect, 2000) }
+          const seen = new Set()
+          ws.onmessage = (e) => {
+            try {
+              const data = JSON.parse(e.data)
+              if (data.type === 'feed') {
+                const ev = data.event
+                const key = `${ev.oracle}:${ev.event}:${ev.ts}`
+                if (seen.has(key)) return
+                seen.add(key)
+                if (seen.size > 500) seen.clear()
+                setEvents(prev => [ev, ...prev].slice(0, 100))
+                setCount(c => c + 1)
+              } else if (data.type === 'feed-history') {
+                const events = (data.events || []).slice(0, 50)
+                setEvents(events)
+                // Don't increment count for history replay
+              }
+            } catch {}
+          }
+        }
+        connect()
+        return () => wsRef.current?.close()
+      }, [])
+
+      const fmt = (ts) => {
+        if (!ts) return ''
+        const d = typeof ts === 'number' ? new Date(ts) : new Date(ts)
+        return d.toLocaleTimeString('en-GB', { hour12: false })
+      }
+
+      return html`
+        <div>
+          <div class="status ${connected ? 'connected' : 'disconnected'}">
+            ${connected ? '● Connected' : '○ Disconnected'} · ${count} events
+          </div>
+          ${events.map((ev, i) => {
+            const msg = (ev.message || '').trim()
+            const tool = msg.replace(/ [✓✗].*$/, '').split(':')[0].trim()
+            const detail = msg.includes(':') ? msg.slice(msg.indexOf(':') + 1).trim() : msg.replace(/^.*[✓✗]\s*/, '')
+            const oneliner = ev.event === 'PostToolUse' ? (msg.includes('✓') ? `${tool} ✓` : `${tool} ✗`)
+              : ev.event === 'PreToolUse' ? `${tool}: ${detail}`.slice(0, 120)
+              : ev.event === 'Stop' ? `⏹ ${msg}`.slice(0, 120)
+              : ev.event === 'UserPromptSubmit' ? `💬 ${msg}`.slice(0, 80)
+              : msg || ev.event
+            return html`
+              <div class="event" key=${i} data-type=${ev.event}>
+                <span class="time">${fmt(ev.ts || ev.timestamp)}</span>
+                <span class="oracle">${ev.oracle}</span>
+                <span class="type">${oneliner}</span>
+              </div>
+            `
+          })}
+          <p class="meta"><a href="index.html">← back</a></p>
+        </div>
+      `
+    }
+
+    createRoot(document.getElementById('root')).render(html`<${App} />`)
+  </script>
+</body>
+</html>
