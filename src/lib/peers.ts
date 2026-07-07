@@ -158,7 +158,7 @@ export async function aggregateAgents(
 
 /**
  * Send a message to a remote node's /api/send.
- * Target format: "node:session" (e.g., "curfew:01-bob")
+ * Target format: "node:session" (e.g., "node:01-bob")
  * Returns the remote response.
  */
 export async function crossNodeSend(
@@ -202,9 +202,97 @@ export async function crossNodeSend(
       return { ok: false, error: `peer responded ${res.status}: ${body}` };
     }
 
+    // T068: async file-push for chip paths in message text
+    pushChipFiles(peer.url, token, nodeName, remoteTarget, text, senderFrom || config.node || "unknown").catch((e: any) => { chipLog(`PUSH-INIT FAIL → ${nodeName}: ${e.message}`); });
+
     return { ok: true, forwarded: true };
   } catch (e: any) {
     return { ok: false, error: `peer unreachable: ${e.message}` };
+  }
+}
+
+const CHIP_FILE_RE = /(?:\/[\w.\-\/]+\.(?:html?|pdf|md|txt|png|jpe?g|webp|gif))/gi;
+const CHIP_ALLOWED_EXT = /\.(png|jpe?g|webp|gif|html?|pdf|md|txt)$/i;
+const CHIP_MAX_SIZE = 10 * 1024 * 1024;
+
+function chipLog(msg: string) {
+  try {
+    const { appendFileSync } = require("fs");
+    const { join } = require("path");
+    const { homedir } = require("os");
+    const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+    appendFileSync(join(homedir(), ".oracle/feed.log"), `${ts} | SYSTEM | local | Notification | SYSTEM | file-relay » ${msg}\n`);
+  } catch {}
+}
+
+async function pushChipFiles(peerUrl: string, token: string, nodeName: string, remoteTarget: string, text: string, senderFrom: string) {
+  const paths = text.match(CHIP_FILE_RE);
+  if (!paths || paths.length === 0) return;
+
+  const { readFileSync, realpathSync, statSync } = await import("fs");
+  const { basename: pathBasename, join } = await import("path");
+  const { homedir } = await import("os");
+  const home = homedir();
+  const config = loadConfig() as any;
+
+  for (const filePath of paths) {
+    const basename = pathBasename(filePath);
+    try {
+      if (!CHIP_ALLOWED_EXT.test(filePath)) continue;
+      const abs = filePath.startsWith("/") ? filePath : join(home, filePath);
+      const resolved = realpathSync(abs);
+      const st = statSync(resolved);
+      if (st.size > CHIP_MAX_SIZE) { chipLog(`SKIP ${basename} → ${nodeName} (>${CHIP_MAX_SIZE} bytes)`); continue; }
+
+      const bytes = readFileSync(resolved);
+      const hasher = new Bun.CryptoHasher("sha256");
+      hasher.update(bytes);
+      const sha256 = hasher.digest("hex");
+
+      const pushPath = "/api/file-push";
+      const { timestamp, signature } = signRequest("POST", pushPath, token);
+
+      const res = await fetch(`${peerUrl}${pushPath}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Maw-Timestamp": timestamp,
+          "X-Maw-Signature": signature,
+        },
+        body: JSON.stringify({
+          from_node: config.node || "unknown",
+          orig_path: filePath,
+          basename,
+          sha256,
+          data: bytes.toString("base64"),
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (res.ok) {
+        const { dest_path } = await res.json() as { dest_path: string };
+        chipLog(`OK ${basename} → ${nodeName} (${dest_path})`);
+        if (dest_path) {
+          const followPath = "/api/federation/send";
+          const { timestamp: ts2, signature: sig2 } = signRequest("POST", followPath, token);
+          await fetch(`${peerUrl}${followPath}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Maw-Timestamp": ts2,
+              "X-Maw-Signature": sig2,
+            },
+            body: JSON.stringify({ target: remoteTarget, text: dest_path, from: senderFrom }),
+            signal: AbortSignal.timeout(10000),
+          }).catch((e: any) => { chipLog(`FOLLOW-UP FAIL ${basename} → ${nodeName}: ${e.message}`); });
+        }
+      } else {
+        const body = await res.text().catch(() => "");
+        chipLog(`FAIL ${basename} → ${nodeName}: HTTP ${res.status} ${body.slice(0, 200)}`);
+      }
+    } catch (e: any) {
+      chipLog(`ERROR ${basename} → ${nodeName}: ${e.message}`);
+    }
   }
 }
 

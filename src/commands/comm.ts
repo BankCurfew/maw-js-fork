@@ -15,10 +15,17 @@ function inferCaller(message?: string): string {
     const m = message.match(/\[[\w-]+:([\w-]+)\]/);
     if (m) return m[1];
   }
+  try {
+    const pane = process.env.TMUX_PANE;
+    if (pane) {
+      const win = execSync(`tmux display-message -p -t '${pane}' '#W'`, { encoding: "utf-8" }).trim();
+      if (win) return win.replace(/^\d+-/, "");
+    }
+  } catch {}
   if (process.env.CLAUDE_AGENT_NAME) return process.env.CLAUDE_AGENT_NAME;
   try {
     const win = execSync("tmux display-message -p '#W'", { encoding: "utf-8" }).trim();
-    if (win) return win.replace(/^\\d+-/, "");
+    if (win) return win.replace(/^\d+-/, "");
   } catch {}
   return "cli";
 }

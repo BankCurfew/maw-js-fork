@@ -486,6 +486,44 @@ app.post("/api/federation/send", requireHmac(), async (c) => {
   return c.json({ ok: true, target: resolved, original: target !== resolved ? target : undefined, text });
 });
 
+// T068: Inbound cross-node file push (HMAC-authenticated)
+app.post("/api/file-push", requireHmac(), async (c) => {
+  const { from_node, orig_path, basename: rawBasename, sha256: expectedHash, data } = await c.req.json();
+  if (!from_node || !rawBasename || !expectedHash || !data) {
+    return c.json({ error: "from_node, basename, sha256, data required" }, 400);
+  }
+  const ALLOWED_EXT = /\.(png|jpe?g|webp|gif|html?|pdf|md|txt)$/i;
+  const MAX_SIZE = 10 * 1024 * 1024;
+  const basename = rawBasename.replace(/[^a-zA-Z0-9._-]/g, "");
+  if (!basename || !ALLOWED_EXT.test(basename)) {
+    return c.json({ error: "unsupported file type" }, 403);
+  }
+  const nodeDir = from_node.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!nodeDir) return c.json({ error: "invalid from_node" }, 400);
+
+  let bytes: Buffer;
+  try { bytes = Buffer.from(data, "base64"); } catch { return c.json({ error: "invalid base64 data" }, 400); }
+  if (bytes.length > MAX_SIZE) return c.json({ error: "file too large (>10MB)" }, 413);
+
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(bytes);
+  const actualHash = hasher.digest("hex");
+  if (actualHash !== expectedHash) {
+    return c.json({ error: "sha256 mismatch" }, 400);
+  }
+
+  const { mkdirSync, writeFileSync } = await import("fs");
+  const { join } = await import("path");
+  const { homedir } = await import("os");
+  const relayDir = join(homedir(), ".maw/inbox/relay", nodeDir);
+  mkdirSync(relayDir, { recursive: true });
+  const destName = `${expectedHash.slice(0, 8)}_${basename}`;
+  const destPath = join(relayDir, destName);
+  writeFileSync(destPath, bytes);
+
+  return c.json({ ok: true, dest_path: destPath });
+});
+
 app.post("/api/select", async (c) => {
   const { target } = await c.req.json();
   if (!target) return c.json({ error: "target required" }, 400);
@@ -1731,7 +1769,7 @@ app.get("/api/health-check", async (c) => {
   };
 
   // PM2 services
-  for (const svc of ["maw", "maw-bob", "arra-api", "maw-syslog"]) {
+  for (const svc of ["maw", "maw-bob", "arra-api", "maw-syslog", "app-line", "bot-discord"]) {
     await check(`PM2: ${svc}`, async () => {
       const pid = run(`pm2 pid ${svc} 2>/dev/null`);
       return pid && pid !== "0" ? null : "not running";
@@ -1739,7 +1777,7 @@ app.get("/api/health-check", async (c) => {
   }
 
   // Port checks
-  for (const p of [{ port: 3456, name: "maw-js" }, { port: 3457, name: "maw-bob" }, { port: 47778, name: "arra-api" }]) {
+  for (const p of [{ port: 3456, name: "maw-js" }, { port: 3457, name: "maw-bob" }, { port: 47778, name: "arra-api" }, { port: 3200, name: "app-line" }]) {
     await check(`Port :${p.port} (${p.name})`, async () => {
       try {
         const res = await fetch(`http://localhost:${p.port}/`, { signal: AbortSignal.timeout(3000) });

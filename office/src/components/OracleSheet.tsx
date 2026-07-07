@@ -380,12 +380,13 @@ export const OracleSheet = memo(function OracleSheet({
       const trimmed = inner.trim();
       return trimmed ? `\n\`\`\`\n⚠ ${trimmed}\n\`\`\`\n` : "";
     });
-    // T061: strip tool-call XML (invoke/parameter blocks from assistant messages)
-    s = s.replace(/<invoke\s+name="([^"]*)"[^>]*>[\s\S]*?<\/invoke>/gi, (_, name) => `\n⚡ ${name}\n`);
+    // T063: strip tool-call XML entirely from history (tool activity = ephemeral thinking bubble only)
+    s = s.replace(/<invoke\s+name="[^"]*"[^>]*>[\s\S]*?<\/invoke>/gi, "");
     s = s.replace(/<invoke[^>]*>[\s\S]*?<\/antml:invoke>/gi, "");
     s = s.replace(/<parameter[^>]*>[\s\S]*?<\/antml:parameter>/gi, "");
     s = s.replace(/<parameter\s+name="[^"]*"[^>]*>[\s\S]*?<\/parameter>/gi, "");
     s = s.replace(/<function_calls>[\s\S]*?<\/antml:function_calls>/gi, "");
+    s = s.replace(/^\s*call\s*$/gm, "");
     // Strip remaining harness wrapper tags (keep inner text)
     s = s.replace(/<\/?(local-command-caveat|command-name|command-message|command-args|local-command-stdout|system-reminder|user-prompt-submit-hook|antml:thinking)[^>]*>/gi, "");
     // Strip empty tag pairs + any remaining antml/function tags
@@ -519,7 +520,18 @@ export const OracleSheet = memo(function OracleSheet({
 
   function renderMessages(msgs: any[], el: HTMLDivElement) {
     try {
-      const newHtml = msgs.map((m: any) => {
+      // T058v3: dedup identical consecutive messages (same role + same text + ts within 10s)
+      const deduped = msgs.filter((m: any, i: number) => {
+        if (i === 0) return true;
+        const prev = msgs[i - 1];
+        if (m.role !== prev.role) return true;
+        const mText = (m.text || "").trim();
+        const pText = (prev.text || "").trim();
+        if (!mText || mText !== pText) return true;
+        const gap = Math.abs(new Date(m.ts || 0).getTime() - new Date(prev.ts || 0).getTime());
+        return gap > 10000;
+      });
+      const newHtml = deduped.map((m: any) => {
         try {
           // System/harness injection → dim collapsed row
           if (m.role === "user" && isSystemMessage(m.text || "")) {
