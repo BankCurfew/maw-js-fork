@@ -1314,50 +1314,74 @@ app.post("/api/federation/thread/:id", requireHmac(), async (c) => {
 /** POST /api/file-push — receive a file from a peer node and write to relay inbox */
 app.post("/api/file-push", requireHmac(), async (c) => {
   const body = await c.req.json().catch(() => null);
-  if (!body) return c.json({ error: "invalid json" }, 400);
-
-  const { from_node, basename: rawBasename, sha256, data, sig } = body;
-  if (!from_node || !rawBasename || !sha256 || !data || !sig) {
-    return c.json({ error: "missing required fields: from_node, basename, sha256, data, sig" }, 400);
+  if (!body) {
+    console.log("[file-push] 400 invalid_json");
+    return c.json({ error: "invalid json" }, 400);
   }
 
-  // Verify body HMAC: HMAC-SHA256(fedKey, 'file-push:<from_node>:<basename>:<sha256>')
+  // sig is optional — body-sig verify only when present (WG+token+sha256 is sufficient)
+  const { from_node, basename: rawBasename, sha256, data, sig } = body;
+  if (!from_node || !rawBasename || !sha256 || !data) {
+    const missing = ["from_node", "basename", "sha256", "data"].filter(k => !body[k]).join(",");
+    console.log(`[file-push] 400 missing_fields: ${missing}`);
+    return c.json({ error: `missing required fields: ${missing}` }, 400);
+  }
+
   const config = loadConfig() as any;
   const fedKey = config?.federationToken;
-  if (!fedKey) return c.json({ error: "federation not configured" }, 503);
+  if (!fedKey) {
+    console.log("[file-push] 503 federation_not_configured");
+    return c.json({ error: "federation not configured" }, 503);
+  }
 
-  const expectedSig = new Bun.CryptoHasher("sha256", fedKey);
-  expectedSig.update(`file-push:${from_node}:${rawBasename}:${sha256}`);
-  const expectedSigHex = expectedSig.digest("hex");
-  const sigBuf = Buffer.from(sig, "hex");
-  const expBuf = Buffer.from(expectedSigHex, "hex");
-  let sigOk = false;
-  try {
-    const { timingSafeEqual } = await import("node:crypto");
-    sigOk = sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf);
-  } catch { sigOk = false; }
-  if (!sigOk) return c.json({ error: "invalid body signature" }, 401);
+  // Optional body HMAC: verify only when sig field is present
+  if (sig) {
+    const expectedSig = new Bun.CryptoHasher("sha256", fedKey);
+    expectedSig.update(`file-push:${from_node}:${rawBasename}:${sha256}`);
+    const expectedSigHex = expectedSig.digest("hex");
+    const sigBuf = Buffer.from(sig, "hex");
+    const expBuf = Buffer.from(expectedSigHex, "hex");
+    let sigOk = false;
+    try {
+      const { timingSafeEqual } = await import("node:crypto");
+      sigOk = sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf);
+    } catch { sigOk = false; }
+    if (!sigOk) {
+      console.log(`[file-push] 401 body_sig_mismatch from=${from_node} file=${rawBasename}`);
+      return c.json({ error: "invalid body signature" }, 401);
+    }
+  }
 
   const { EXT_ALLOWLIST, MAX_RELAY_BYTES } = await import("./lib/file-patterns");
 
   // Sanitize basename: strip any path separators, allow only safe chars
   const safeName = basename(rawBasename).replace(/[^a-zA-Z0-9._\-]/g, "_");
   const ext = safeName.split(".").pop()?.toLowerCase() || "";
-  if (!EXT_ALLOWLIST.has(ext)) return c.json({ error: `extension .${ext} not allowed` }, 415);
+  if (!EXT_ALLOWLIST.has(ext)) {
+    console.log(`[file-push] 415 ext_not_allowed from=${from_node} ext=.${ext}`);
+    return c.json({ error: `extension .${ext} not allowed` }, 415);
+  }
 
   // Decode base64
   let bytes: Buffer;
   try {
     bytes = Buffer.from(data, "base64");
   } catch {
+    console.log(`[file-push] 400 invalid_base64 from=${from_node} file=${safeName}`);
     return c.json({ error: "invalid base64 data" }, 400);
   }
-  if (bytes.length > MAX_RELAY_BYTES) return c.json({ error: "file exceeds 10MB limit" }, 413);
+  if (bytes.length > MAX_RELAY_BYTES) {
+    console.log(`[file-push] 413 too_large from=${from_node} file=${safeName} size=${bytes.length}`);
+    return c.json({ error: "file exceeds 10MB limit" }, 413);
+  }
 
   // Verify SHA-256
   const { createHash } = await import("node:crypto");
   const actual = createHash("sha256").update(bytes).digest("hex");
-  if (actual !== sha256) return c.json({ error: "sha256 mismatch" }, 422);
+  if (actual !== sha256) {
+    console.log(`[file-push] 422 sha256_mismatch from=${from_node} file=${safeName}`);
+    return c.json({ error: "sha256 mismatch" }, 422);
+  }
 
   // Write to ~/.maw/inbox/relay/<from_node>/<sha256[:8]>_<safeName>
   const home = homedir();
@@ -1368,6 +1392,7 @@ app.post("/api/file-push", requireHmac(), async (c) => {
   const destPath = join(relayDir, destName);
   _writeFile(destPath, bytes);
 
+  console.log(`[file-push] 200 ok from=${from_node} file=${safeName} dest=${destPath}`);
   return c.json({ dest_path: destPath });
 });
 
