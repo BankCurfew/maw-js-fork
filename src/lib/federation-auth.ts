@@ -83,6 +83,8 @@ export function requireHmac() {
     const path = new URL(c.req.url).pathname;
 
     if (!verifyRequest(method, path, timestamp, signature)) {
+      const reason = (!timestamp || !signature) ? "missing_headers" : "verify_fail";
+      console.log(`[federation-auth] 401 ${method} ${path} — ${reason}`);
       return c.json({ error: "invalid or missing HMAC signature" }, 401);
     }
 
