@@ -265,6 +265,32 @@ async function purgeStaleQueue(): Promise<number> {
   return purged;
 }
 
+/** Purge relay inbox files older than 7 days (daily cleanup companion to purgeStaleQueue) */
+async function purgeStaleRelay(): Promise<number> {
+  const MAX_RELAY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const relayRoot = join(require("os").homedir(), ".maw", "inbox", "relay");
+  let purged = 0;
+  try {
+    if (!existsSync(relayRoot)) return 0;
+    const { readdirSync: _readdir, statSync: _stat, unlinkSync: _unlink } = require("fs");
+    const now = Date.now();
+    for (const nodeName of _readdir(relayRoot)) {
+      const nodeDir = join(relayRoot, nodeName);
+      try {
+        for (const fname of _readdir(nodeDir)) {
+          const fpath = join(nodeDir, fname);
+          const age = now - _stat(fpath).mtimeMs;
+          if (age > MAX_RELAY_AGE_MS) {
+            _unlink(fpath);
+            purged++;
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return purged;
+}
+
 // --- Log management ---
 
 function loadLog(): LoopExecution[] {
@@ -357,6 +383,7 @@ export class LoopEngine {
     if (now.getMinutes() % 5 === 0 && now.getSeconds() < 30) {
       this.checkQueueLiveness().catch(() => {});
       purgeStaleQueue().catch(() => {});
+      purgeStaleRelay().catch(() => {});
     }
   }
 
