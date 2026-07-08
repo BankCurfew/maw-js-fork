@@ -19,9 +19,11 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   const [captureHtml, setCaptureHtml] = useState("");
   const [inputBuf, setInputBuf] = useState("");
   const [sendQueue, setSendQueue] = useState<string[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<HTMLDivElement>(null);
+  const inputElRef = useRef<HTMLInputElement>(null);
   const sendingRef = useRef(false);
   const { uploading, attachments, inputRef: fileInputRef, pickFile, onFileChange, removeAttachment, clearAttachments, buildMessage, drag, onPaste } = useFileAttach();
 
@@ -73,7 +75,11 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     setCaptureHtml("");
     setInputBuf("");
     setSendQueue([]);
-    termRef.current?.focus();
+    // Collapse the session list — on mobile this frees the whole screen for the
+    // terminal + input; on desktop the sidebar stays visible via md:flex.
+    setSidebarOpen(false);
+    // Focus the real input so the mobile soft keyboard opens
+    requestAnimationFrame(() => inputElRef.current?.focus());
   }, []);
 
   // Flush send queue
@@ -105,9 +111,9 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     requestAnimationFrame(() => outputRef.current?.scrollTo(0, outputRef.current.scrollHeight));
   }, [selectedTarget]);
 
-  // Keyboard handler
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Alt+Arrow to navigate between windows
+  // Keydown handler for the real <input> element (mobile + desktop typing).
+  // onChange manages the text buffer; this only handles control keys.
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
       e.preventDefault();
       if (!selectedTarget) return;
@@ -115,13 +121,10 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       const idx = allWindows.findIndex(w => w.target === selectedTarget);
       if (idx < 0) return;
       const dir = e.key === "ArrowLeft" ? -1 : 1;
-      const next = allWindows[(idx + dir + allWindows.length) % allWindows.length];
-      selectWindow(next.target);
+      selectWindow(allWindows[(idx + dir + allWindows.length) % allWindows.length].target);
       return;
     }
-
     if (!selectedTarget) return;
-
     if (e.key === "Enter") {
       e.preventDefault();
       if (inputBuf || attachments.length > 0) {
@@ -129,37 +132,22 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         setInputBuf("");
         clearAttachments();
       } else sendRawKey("\n");
-    } else if (e.key === "ArrowUp") {
+    } else if (e.key === "ArrowUp" && !inputBuf) {
       e.preventDefault();
       sendRawKey("\x1b[A");
-    } else if (e.key === "ArrowDown") {
+    } else if (e.key === "ArrowDown" && !inputBuf) {
       e.preventDefault();
       sendRawKey("\x1b[B");
-    } else if (e.key === "Backspace") {
-      e.preventDefault();
-      if (inputBuf) {
-        if (e.metaKey || e.ctrlKey) setInputBuf("");
-        else setInputBuf(b => b.slice(0, -1));
-      } else {
-        sendRawKey("\x7f");
-      }
     } else if (e.key === "Escape") {
       e.preventDefault();
       if (inputBuf || sendQueue.length > 0) { setInputBuf(""); setSendQueue([]); }
       else sendRawKey("\x1b");
-    } else if (e.key === "c" && e.ctrlKey) {
-      e.preventDefault();
-      setInputBuf(""); setSendQueue([]);
-      sendRawKey("\x03");
     } else if (e.key === "Tab") {
       e.preventDefault();
       queueSend(inputBuf + "\t");
       setInputBuf("");
-    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      setInputBuf(b => b + e.key);
     }
-  }, [selectedTarget, inputBuf, attachments, queueSend, sendRawKey, selectWindow, sessions, buildMessage, clearAttachments]);
+  }, [selectedTarget, inputBuf, attachments, sendQueue, queueSend, sendRawKey, selectWindow, sessions, buildMessage, clearAttachments]);
 
   // Get display name for selected target
   const selectedName = selectedTarget
@@ -167,9 +155,9 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     : "";
 
   return (
-    <div className="flex flex-col md:flex-row mx-2 sm:mx-4 md:mx-6 mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100vh - 72px)" }}>
-      {/* Sidebar */}
-      <div className="w-full md:w-[220px] flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-white/[0.06] max-h-[40vh] md:max-h-none overflow-y-auto" style={{ background: "#08080e" }}>
+    <div className="flex flex-col md:flex-row mx-2 sm:mx-4 md:mx-6 mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100dvh - 72px)" }}>
+      {/* Sidebar — collapsible on mobile so terminal + input fill the screen */}
+      <div className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-full md:w-[220px] flex-shrink-0 flex-col border-b md:border-b-0 md:border-r border-white/[0.06] max-h-[45vh] md:max-h-none overflow-y-auto`} style={{ background: "#08080e" }}>
         {[...sessions].sort((a, b) => a.name === "shell" ? -1 : b.name === "shell" ? 1 : 0).map(session => {
           const style = roomStyle(session.name);
           return (
@@ -212,20 +200,26 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       {/* Terminal pane */}
       <div
         ref={termRef}
-        className="flex-1 flex flex-col min-w-0 outline-none"
+        className={`${sidebarOpen ? "hidden md:flex" : "flex"} flex-1 flex-col min-w-0 min-h-0 outline-none`}
         data-terminal="true"
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
         onPaste={onPaste}
-        onClick={() => termRef.current?.focus()}
         {...drag}
       >
         <FileInput inputRef={fileInputRef} onChange={onFileChange} />
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
-          <span className="text-xs font-mono text-white/40">{selectedName || "select a window"}</span>
-          {selectedTarget && <span className="text-[10px] font-mono text-white/20">{selectedTarget}</span>}
-          <span className="ml-auto text-[10px] font-mono" style={{ color: connected ? "#4caf50" : "#ef5350" }}>
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
+          {/* Mobile: back to session list */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden flex-shrink-0 text-white/40 hover:text-cyan-400 -ml-1 mr-1"
+            title="Sessions"
+            aria-label="Show sessions"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+          </button>
+          <span className="text-xs font-mono text-white/40 truncate">{selectedName || "select a window"}</span>
+          {selectedTarget && <span className="text-[10px] font-mono text-white/20 hidden sm:inline">{selectedTarget}</span>}
+          <span className="ml-auto flex-shrink-0 text-[10px] font-mono" style={{ color: connected ? "#4caf50" : "#ef5350" }}>
             {connected ? "live" : "reconnecting"}
           </span>
         </div>
@@ -233,7 +227,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         {/* Output */}
         <div
           ref={outputRef}
-          className="flex-1 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-[11px] sm:text-[13px] leading-[1.35]"
+          className="flex-1 min-h-0 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-[11px] sm:text-[13px] leading-[1.35]"
           style={{ background: "#0a0a0f", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word", color: "#aaa", overscrollBehavior: "contain", touchAction: "auto", userSelect: "text", WebkitUserSelect: "text" }}
         >
           {captureHtml ? (
@@ -267,18 +261,28 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             </svg>
           </button>
           {selectedTarget && <ProjectSelector agentName={selectedTarget.replace(/^\d+-/, "").replace(/:.*$/, "")} compact />}
-          <span className="text-white/30 mr-2">&gt;</span>
-          <span className="text-white/90 whitespace-pre">{inputBuf}</span>
-          <span
-            className="inline-block w-[7px] h-[15px] ml-[1px] align-middle"
-            style={{ background: selectedTarget ? "#89b4fa" : "#333", animation: "blink 1s step-end infinite" }}
+          <span className="text-white/30 mr-2 flex-shrink-0">&gt;</span>
+          <input
+            ref={inputElRef}
+            type="text"
+            value={inputBuf}
+            onChange={(e) => setInputBuf(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            disabled={!selectedTarget}
+            placeholder={selectedTarget ? "type a message, Enter to send" : "select a window ←"}
+            enterKeyHint="send"
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            className="flex-1 min-w-0 bg-transparent border-none outline-none text-white/90 font-mono text-[13px] placeholder:text-white/20"
           />
           {sendQueue.length > 0 && (
-            <span className="text-white/30 text-[11px] ml-2">({sendQueue.length} queued)</span>
+            <span className="text-white/30 text-[11px] ml-2 flex-shrink-0">({sendQueue.length} queued)</span>
           )}
           {(inputBuf || sendQueue.length > 0) && (
             <span
-              className="ml-auto text-white/30 text-[11px] cursor-pointer hover:text-red-400 px-2 rounded"
+              className="ml-2 flex-shrink-0 text-white/30 text-[11px] cursor-pointer hover:text-red-400 px-2 rounded"
               onClick={() => { setInputBuf(""); setSendQueue([]); clearAttachments(); }}
             >
               esc
@@ -294,7 +298,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             {TERMINAL_COMMANDS.map(cmd => (
               <button
                 key={cmd.label}
-                onClick={() => { sendRawKey(cmd.text); termRef.current?.focus(); }}
+                onClick={() => { sendRawKey(cmd.text); inputElRef.current?.focus(); }}
                 className="px-2.5 py-1 rounded text-[11px] font-mono cursor-pointer select-none active:scale-95 transition-transform"
                 style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}
               >

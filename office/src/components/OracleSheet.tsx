@@ -291,7 +291,7 @@ export const OracleSheet = memo(function OracleSheet({
     return `<div style="display:flex;gap:6px;overflow-x:auto;margin-top:6px;padding:2px 0">${thumbs}</div>`;
   }
 
-  const FILE_RE = /(?:\/[\w.\-\/]+\.(?:html?|pdf|md|txt))/gi;
+  const FILE_RE = /(?:\/[\w฀-๿.\-\/]+\.(?:html?|pdf|md|txt))/gi;
 
   function extractFiles(text: string): string[] {
     return (text.match(FILE_RE) || []).filter(f => f.length > 5 && fileValidCache.current.get(f) === true);

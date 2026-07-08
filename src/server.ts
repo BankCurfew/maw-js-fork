@@ -306,7 +306,7 @@ app.get("/api/file", async (c) => {
     "/mnt/c/Users/mbank/Downloads",
   ];
   const ALLOWED_EXT = /\.(png|jpe?g|webp|gif|html?|pdf|md|txt)$/i;
-  const MAX_SIZE = 10 * 1024 * 1024;
+  const MAX_SIZE = 20 * 1024 * 1024;
   if (!ALLOWED_EXT.test(filePath)) return c.json({ error: "unsupported file type" }, 403);
   let resolved: string;
   try {
