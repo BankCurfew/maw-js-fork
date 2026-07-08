@@ -271,7 +271,7 @@ export const OracleSheet = memo(function OracleSheet({
     return ts.slice(11, 19);
   }
 
-  const IMG_RE = /(?:\/[\w.\-\/]+\.(?:png|jpe?g|webp|gif))|(?:https?:\/\/[^\s<&]+\.(?:png|jpe?g|webp|gif))/gi;
+  const IMG_RE = /(?:\/[\w฀-๿.\-\/]+\.(?:png|jpe?g|webp|gif))|(?:https?:\/\/[^\s<&]+\.(?:png|jpe?g|webp|gif))/gi;
 
   function extractImages(text: string): { images: string[]; clean: string } {
     const images: string[] = [];
@@ -874,6 +874,17 @@ export const OracleSheet = memo(function OracleSheet({
 
     async function pollNew() {
       try {
+        // Prune stale optimistic bubbles (>15s). A pending "you" message is
+        // reconciled when its echo lands in the local transcript — but a
+        // federated send (e.g. to nobi on another node) never echoes back
+        // here, so without this it stays pinned at the bottom forever.
+        const now = Date.now();
+        const stale = (m: any) => m.pending && now - new Date(m.ts || 0).getTime() > 15000;
+        if (msgsRef.current.some(stale)) {
+          msgsRef.current = msgsRef.current.filter((m: any) => !stale(m));
+          const el0 = termRef.current;
+          if (el0) renderMessages(msgsRef.current, el0);
+        }
         // Fetch both transcript and comms incrementally
         const [transcriptRes, commsRes] = await Promise.all([
           fetch(`/api/transcript?oracle=${encodeURIComponent(oracleName)}&limit=10`),
