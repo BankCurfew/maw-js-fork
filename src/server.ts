@@ -306,7 +306,7 @@ app.get("/api/file", async (c) => {
     "/mnt/c/Users/mbank/Downloads",
   ];
   const ALLOWED_EXT = /\.(png|jpe?g|webp|gif|html?|pdf|md|txt)$/i;
-  const MAX_SIZE = 20 * 1024 * 1024;
+  const MAX_SIZE = 50 * 1024 * 1024;
   if (!ALLOWED_EXT.test(filePath)) return c.json({ error: "unsupported file type" }, 403);
   let resolved: string;
   try {
@@ -447,7 +447,7 @@ app.post("/api/federation/send", requireHmac(), async (c) => {
   const resolved = findWindow(sessions, target) || target;
   // Prepend sender identity so recipient knows who sent the message
   const from = senderName || "federation";
-  const taggedText = `[from ${from}] ${text}`;
+  const taggedText = text.startsWith("[from:") ? text : `[from:${from}] ${text}`;
   await sendKeys(resolved, taggedText);
 
   // Audit trail — mirror cmdSend's feed.log + inbox + maw-log writes
@@ -1703,8 +1703,8 @@ app.post("/api/attach", async (c) => {
     const file = form.get("file");
     if (!file || !(file instanceof File)) return c.json({ error: "file required" }, 400);
 
-    // Limit to 20MB
-    if (file.size > 20 * 1024 * 1024) return c.json({ error: "file too large (max 20MB)" }, 400);
+    // Limit to 50MB (financial statements / decks can be large)
+    if (file.size > 50 * 1024 * 1024) return c.json({ error: "file too large (max 50MB)" }, 400);
 
     const ext = extname(file.name).toLowerCase() || "";
     const id = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
