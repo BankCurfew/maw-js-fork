@@ -265,7 +265,13 @@ export const OracleSheet = memo(function OracleSheet({
     if (!ts) return "";
     try {
       if (ts.includes("T") || ts.includes("Z") || ts.includes("+")) {
-        return new Date(ts).toLocaleTimeString("en-GB", { hour12: false });
+        const d = new Date(ts);
+        const now = new Date();
+        const time = d.toLocaleTimeString("en-GB", { hour12: false });
+        if (d.toDateString() !== now.toDateString()) {
+          return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }) + " " + time;
+        }
+        return time;
       }
     } catch {}
     return ts.slice(11, 19);
@@ -438,29 +444,52 @@ export const OracleSheet = memo(function OracleSheet({
     return "system message";
   }
 
-  function parseSender(m: any): { label: string; color: string } {
-    if (m.role !== "user") return { label: `◀ ${displayName}`, color: "#f9e2af" };
+  type MsgType = "assistant" | "system" | "you" | "hey" | "thread" | "cc" | "task" | "inbox";
+
+  const msgTypeBubble: Record<MsgType, { bg: string; border: string }> = {
+    assistant: { bg: "rgba(249,226,175,0.05)", border: "rgba(249,226,175,0.1)" },
+    system:    { bg: "rgba(255,255,255,0.02)", border: "rgba(255,255,255,0.05)" },
+    you:       { bg: "rgba(137,180,250,0.12)", border: "rgba(137,180,250,0.25)" },
+    hey:       { bg: "rgba(166,227,161,0.10)", border: "rgba(166,227,161,0.20)" },
+    thread:    { bg: "rgba(249,226,175,0.10)", border: "rgba(249,226,175,0.20)" },
+    cc:        { bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)" },
+    task:      { bg: "rgba(239,68,68,0.08)",   border: "rgba(239,68,68,0.18)" },
+    inbox:     { bg: "rgba(148,226,213,0.08)", border: "rgba(148,226,213,0.15)" },
+  };
+
+  function parseSender(m: any): { label: string; color: string; type: MsgType } {
+    if (m.role !== "user") return { label: `◀ ${displayName}`, color: "#f9e2af", type: "assistant" };
     const text = m.text || "";
-    // System/harness injections — never "you"
-    if (isSystemMessage(text)) return { label: "⚙ system", color: "rgba(255,255,255,0.25)" };
-    // Dashboard-sent messages
+    if (isSystemMessage(text)) return { label: "⚙ system", color: "rgba(255,255,255,0.25)", type: "system" };
     if (m.pending || sentFromDashboard.current.has(text.slice(0, 50))) {
-      return { label: m.pending ? "▶ you ⏳" : "▶ you", color: "#89b4fa" };
+      return { label: m.pending ? "▶ you ⏳" : "▶ you", color: "#89b4fa", type: "you" };
     }
+    // Detect message type from content
+    const isCc = /\bcc:/i.test(text);
+    const isTask = /^(?:\[[\w-]+\]\s*)?TASK:/i.test(text);
+    const isThread = /Thread #\d+/i.test(text);
     // [from:oracle] tag — injected by cmdSend
     const fromTag = text.match(/^\[from:([a-z][\w-]*)\]\s*/i);
-    if (fromTag) return { label: `▶ ${fromTag[1].toLowerCase()}`, color: "#a6e3a1" };
+    if (fromTag) {
+      const name = fromTag[1].toLowerCase();
+      const type: MsgType = isTask ? "task" : isThread ? "thread" : isCc ? "cc" : "hey";
+      const colors: Record<MsgType, string> = { task: "#ef4444", thread: "#f9e2af", cc: "rgba(255,255,255,0.4)", hey: "#a6e3a1", assistant: "", system: "", you: "", inbox: "" };
+      return { label: `▶ ${name}`, color: colors[type] || "#a6e3a1", type };
+    }
     // Thread relay — parse sender
     const threadMatch = text.match(/Thread #\d+ from ([A-Za-z][\w-]*)/i);
-    if (threadMatch) return { label: `▶ ${threadMatch[1].replace(/-Oracle$/i, "").toLowerCase()}`, color: "#a6e3a1" };
+    if (threadMatch) return { label: `▶ ${threadMatch[1].replace(/-Oracle$/i, "").toLowerCase()}`, color: "#f9e2af", type: "thread" };
     // [project] prefix with known oracle patterns
     const projSender = text.match(/^\[[\w-]+\]\s*(?:cc:\s*)?(?:#\d+\s+)?(?:from\s+)?([A-Z][\w-]*-Oracle)/i);
-    if (projSender) return { label: `▶ ${projSender[1].replace(/-Oracle$/i, "").toLowerCase()}`, color: "#a6e3a1" };
-    // Generic inbox for unattributable relays
-    if (/^\[[\w-]+\]/.test(text) && !sentFromDashboard.current.has(text.slice(0, 50))) {
-      return { label: "▶ inbox", color: "#94e2d5" };
+    if (projSender) {
+      const name = projSender[1].replace(/-Oracle$/i, "").toLowerCase();
+      const type: MsgType = isTask ? "task" : isCc ? "cc" : "hey";
+      return { label: `▶ ${name}`, color: type === "task" ? "#ef4444" : type === "cc" ? "rgba(255,255,255,0.4)" : "#a6e3a1", type };
     }
-    return { label: "▶ you", color: "#89b4fa" };
+    if (/^\[[\w-]+\]/.test(text) && !sentFromDashboard.current.has(text.slice(0, 50))) {
+      return { label: "▶ inbox", color: "#94e2d5", type: "inbox" };
+    }
+    return { label: "▶ you", color: "#89b4fa", type: "you" };
   }
 
   function hashColor(s: string): string {
@@ -556,8 +585,9 @@ export const OracleSheet = memo(function OracleSheet({
           }
           const isUser = m.role === "user";
           const sender = parseSender(m);
-          const bg = isUser ? "rgba(137,180,250,0.12)" : "rgba(249,226,175,0.05)";
-          const border = isUser ? "rgba(137,180,250,0.25)" : "rgba(249,226,175,0.1)";
+          const bubble = msgTypeBubble[sender.type] || msgTypeBubble.you;
+          const bg = bubble.bg;
+          const border = bubble.border;
           const label = `<span style="color:${sender.color};font-weight:600">${sender.label}</span>`;
           const ts = m.ts ? `<span style="color:rgba(255,255,255,0.2);margin-left:6px">${esc(fmtTime(m.ts))}</span>` : "";
           const raw = m.text || "";
