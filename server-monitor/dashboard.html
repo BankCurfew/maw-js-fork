@@ -298,7 +298,7 @@ function render(data){
   const activeSvcs=data.pm2.filter(s=>!s.expectedOffline);
   const online=activeSvcs.filter(s=>s.status==='online').length;
   const total=activeSvcs.length;
-  const healthOk=data.health.every(h=>h.status>0&&h.status<400);
+  const healthOk=data.health.every(h=>h.status>0);
   const allOk=online===total&&healthOk;
   const heroDot=document.getElementById('heroDot');
   const heroTitle=document.getElementById('heroTitle');
@@ -347,7 +347,7 @@ function render(data){
   document.getElementById('tunnelCount').textContent=data.tunnel.connectors;
   document.getElementById('tunnelCount').style.color=data.tunnel.connectors>0?'var(--green)':'var(--red)';
   document.getElementById('healthList').innerHTML=(data.health||[]).map(h=>{
-    const up=h.status>0&&h.status<400;
+    const up=h.status>0;
     return '<div class="health-item"><div class="health-dot '+(up?'up':'down')+'"></div><span>'+h.name+'</span><span class="lat tabnum">'+(up?h.latency+'ms':'DOWN')+'</span></div>';
   }).join('');
   document.getElementById('failoverState').textContent=data.failover.state;
