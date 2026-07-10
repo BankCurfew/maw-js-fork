@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle — Server Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" async></script>
+<style>
+:root{--bg:#0a0e1a;--card:rgba(15,23,42,0.7);--card-border:rgba(56,189,248,0.12);--glass:rgba(15,23,42,0.5);--text:#e2e8f0;--dim:#64748b;--cyan:#22d3ee;--blue:#38bdf8;--green:#34d399;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 50%,rgba(56,189,248,0.04) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(34,211,238,0.03) 0%,transparent 50%);pointer-events:none;z-index:0}
+.container{max-width:1200px;margin:0 auto;padding:16px;position:relative;z-index:1}
+h1,h2,h3,.gauge-label,.hero-value{font-family:'Rajdhani',sans-serif}
+.tabnum{font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+
+/* Hero Strip */
+.hero{background:var(--card);backdrop-filter:blur(20px);border:1px solid var(--card-border);border-radius:16px;padding:20px 28px;margin-bottom:20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.hero-status{display:flex;align-items:center;gap:12px;flex:1;min-width:240px}
+.hero-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;box-shadow:0 0 12px currentColor}
+.hero-dot.ok{background:var(--green);color:var(--green)}
+.hero-dot.warn{background:var(--amber);color:var(--amber)}
+.hero-dot.err{background:var(--red);color:var(--red)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
+.hero-dot{animation:pulse 2s ease-in-out infinite}
+.hero-text h1{font-size:20px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.hero-text .sub{font-size:12px;color:var(--dim);margin-top:2px}
+.hero-stats{display:flex;gap:20px;flex-wrap:wrap}
+.hero-stat{text-align:center;min-width:70px}
+.hero-value{font-size:28px;font-weight:700;line-height:1}
+.hero-label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+
+/* Section */
+.section{margin-bottom:20px}
+.section-title{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;padding-left:4px}
+
+/* Gauge Row */
+.gauge-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:20px}
+.gauge-card{background:var(--card);backdrop-filter:blur(20px);border:1px solid var(--card-border);border-radius:16px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center}
+.gauge-canvas{width:140px;height:140px}
+.gauge-label{font-size:22px;font-weight:700;margin-top:-30px;position:relative}
+.gauge-sub{font-size:11px;color:var(--dim);margin-top:2px}
+
+/* Chart Row */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:768px){.chart-row{grid-template-columns:1fr}}
+.chart-card{background:var(--card);backdrop-filter:blur(20px);border:1px solid var(--card-border);border-radius:16px;padding:16px}
+.chart-card h3{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--cyan)}
+.chart-wrap{height:180px;position:relative}
+
+/* PM2 Grid */
+.pm2-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.svc-card{background:var(--card);backdrop-filter:blur(20px);border:1px solid var(--card-border);border-radius:12px;padding:14px;transition:border-color .3s}
+.svc-card.online{border-color:rgba(52,211,153,0.25)}
+.svc-card.errored,.svc-card.stopped{border-color:rgba(248,113,113,0.3)}
+.svc-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.svc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.svc-dot.online{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+.svc-dot.errored,.svc-dot.stopped{background:var(--red);box-shadow:0 0 6px var(--red)}
+.svc-dot.waiting{background:var(--amber)}
+.svc-name{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600}
+.svc-detail{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:var(--dim)}
+.svc-detail .val{color:var(--text);font-weight:500}
+.mem-bar{height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:8px;overflow:hidden}
+.mem-bar-fill{height:100%;border-radius:2px;transition:width .5s;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+
+/* Widgets Row */
+.widget-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+.widget{background:var(--card);backdrop-filter:blur(20px);border:1px solid var(--card-border);border-radius:12px;padding:14px}
+.widget h3{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.widget .big{font-family:'Rajdhani',sans-serif;font-size:32px;font-weight:700;line-height:1}
+.health-item{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+.health-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.health-dot.up{background:var(--green)}
+.health-dot.down{background:var(--red)}
+.lat{margin-left:auto;color:var(--dim);font-size:11px}
+
+/* Footer */
+.footer{text-align:center;padding:12px;font-size:10px;color:var(--dim)}
+
+/* Error */
+.error-banner{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:12px;padding:12px;margin-bottom:16px;color:var(--red);display:none;font-size:13px}
+
+/* Responsive */
+@media(max-width:640px){
+  .hero{padding:16px;gap:16px}
+  .hero-value{font-size:22px}
+  .gauge-row{grid-template-columns:repeat(3,1fr);gap:8px}
+  .gauge-card{padding:12px}
+  .gauge-canvas{width:100px;height:100px}
+  .gauge-label{font-size:16px;margin-top:-22px}
+  .pm2-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .container{padding:10px}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="error-banner" id="error"></div>
+
+  <!-- Hero Strip -->
+  <div class="hero" id="hero">
+    <div class="hero-status">
+      <div class="hero-dot ok" id="heroDot"></div>
+      <div class="hero-text">
+        <h1 id="heroTitle">LOADING...</h1>
+        <div class="sub" id="heroSub">Connecting to collector</div>
+      </div>
+    </div>
+    <div class="hero-stats" id="heroStats"></div>
+  </div>
+
+  <!-- Gauge Row -->
+  <div class="section">
+    <div class="section-title">System Resources</div>
+    <div class="gauge-row">
+      <div class="gauge-card">
+        <canvas class="gauge-canvas" id="gCpu"></canvas>
+        <div class="gauge-label tabnum" id="gCpuVal">--%</div>
+        <div class="gauge-sub">CPU</div>
+      </div>
+      <div class="gauge-card">
+        <canvas class="gauge-canvas" id="gMem"></canvas>
+        <div class="gauge-label tabnum" id="gMemVal">--%</div>
+        <div class="gauge-sub" id="gMemSub">RAM</div>
+      </div>
+      <div class="gauge-card">
+        <canvas class="gauge-canvas" id="gDisk"></canvas>
+        <div class="gauge-label tabnum" id="gDiskVal">--%</div>
+        <div class="gauge-sub" id="gDiskSub">Disk</div>
+      </div>
+      <div class="gauge-card">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:140px">
+          <div class="gauge-label tabnum" id="loadVal" style="margin-top:0;font-size:28px">--</div>
+          <div class="gauge-sub">Load 1m</div>
+          <div style="margin-top:8px;font-size:11px;color:var(--dim)" id="loadAll">-- / -- / --</div>
+          <div class="gauge-sub">1m / 5m / 15m</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart Row -->
+  <div class="section">
+    <div class="section-title">Performance History</div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3>CPU & Memory</h3>
+        <div class="chart-wrap"><canvas id="chartCpuMem"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Endpoint Latency</h3>
+        <div class="chart-wrap"><canvas id="chartLatency"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PM2 Grid -->
+  <div class="section">
+    <div class="section-title" id="pm2Title">Services</div>
+    <div class="pm2-grid" id="pm2Grid"></div>
+  </div>
+
+  <!-- Widgets Row -->
+  <div class="section">
+    <div class="section-title">Infrastructure</div>
+    <div class="widget-row">
+      <div class="widget" id="tunnelWidget">
+        <h3>Tunnel Connectors</h3>
+        <div class="big tabnum" id="tunnelCount">--</div>
+      </div>
+      <div class="widget">
+        <h3>Health Endpoints</h3>
+        <div id="healthList"></div>
+      </div>
+      <div class="widget">
+        <h3>Failover State</h3>
+        <div class="big" id="failoverState" style="font-size:16px">--</div>
+        <div style="margin-top:6px;font-size:11px;color:var(--dim)">Sync: <span id="syncLag">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer" id="footer">Oracle Server Monitor · Last update: --</div>
+</div>
+
+<script>
+const POLL_MS = 15000;
+const latencyHistory = {};
+
+function fmtBytes(b){
+  if(b>=1e12)return(b/1e12).toFixed(1)+' TB';
+  if(b>=1e9)return(b/1e9).toFixed(1)+' GB';
+  if(b>=1e6)return(b/1e6).toFixed(0)+' MB';
+  return(b/1e3).toFixed(0)+' KB';
+}
+function fmtUptime(s){
+  const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d>0)return d+'d '+h+'h';if(h>0)return h+'h '+m+'m';return m+'m';
+}
+function fmtPm2Up(t){return t?fmtUptime(Math.floor((Date.now()-t)/1000)):'-'}
+function gaugeColor(pct){
+  if(pct>80)return'#f87171';if(pct>60)return'#fbbf24';return'#34d399';
+}
+
+// Radial Gauge
+function drawGauge(canvasId,pct,prevPct){
+  const c=document.getElementById(canvasId);if(!c)return;
+  const ctx=c.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const w=c.clientWidth,h=c.clientHeight;
+  c.width=w*dpr;c.height=h*dpr;
+  ctx.scale(dpr,dpr);
+  const cx=w/2,cy=h/2,r=Math.min(w,h)/2-8,lw=10;
+  const startA=0.75*Math.PI,endA=2.25*Math.PI;
+  const range=endA-startA;
+  // Background arc
+  ctx.beginPath();ctx.arc(cx,cy,r,startA,endA);
+  ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=lw;ctx.lineCap='round';ctx.stroke();
+  // Value arc with gradient
+  const valA=startA+range*(Math.min(pct,100)/100);
+  const grad=ctx.createLinearGradient(0,h,w,0);
+  const col=gaugeColor(pct);
+  grad.addColorStop(0,col+'66');grad.addColorStop(1,col);
+  ctx.beginPath();ctx.arc(cx,cy,r,startA,valA);
+  ctx.strokeStyle=grad;ctx.lineWidth=lw;ctx.lineCap='round';ctx.stroke();
+  // Glow
+  ctx.beginPath();ctx.arc(cx,cy,r,startA,valA);
+  ctx.strokeStyle=col+'33';ctx.lineWidth=lw+6;ctx.lineCap='round';ctx.stroke();
+}
+
+// Charts
+let cpuMemChart=null,latencyChart=null;
+
+function initCharts(){
+  const commonOpts={responsive:true,maintainAspectRatio:false,animation:{duration:500},
+    plugins:{legend:{display:true,position:'top',labels:{color:'#64748b',font:{size:10},boxWidth:10,padding:8}}},
+    scales:{x:{display:false},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'},border:{display:false}}}
+  };
+  cpuMemChart=new Chart(document.getElementById('chartCpuMem'),{type:'line',
+    data:{labels:[],datasets:[
+      {label:'CPU %',data:[],borderColor:'#22d3ee',backgroundColor:'rgba(34,211,238,0.08)',fill:true,tension:.3,pointRadius:0,borderWidth:1.5},
+      {label:'RAM %',data:[],borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,0.06)',fill:true,tension:.3,pointRadius:0,borderWidth:1.5}
+    ]},options:{...commonOpts,scales:{...commonOpts.scales,y:{...commonOpts.scales.y,min:0,max:100}}}
+  });
+  latencyChart=new Chart(document.getElementById('chartLatency'),{type:'line',
+    data:{labels:[],datasets:[]},
+    options:{...commonOpts,scales:{...commonOpts.scales,y:{...commonOpts.scales.y,min:0,
+      ticks:{...commonOpts.scales.y.ticks,callback:v=>v+'ms'}}}}
+  });
+}
+
+function updateCharts(data){
+  if(!cpuMemChart)return;
+  const hist=data.history||{};
+  const labels=(hist.cpu||[]).map((_,i)=>i);
+  cpuMemChart.data.labels=labels;
+  cpuMemChart.data.datasets[0].data=hist.cpu||[];
+  cpuMemChart.data.datasets[1].data=hist.mem||[];
+  cpuMemChart.update('none');
+
+  // Latency history
+  for(const h of (data.health||[])){
+    if(!latencyHistory[h.name])latencyHistory[h.name]=[];
+    latencyHistory[h.name].push(h.latency);
+    if(latencyHistory[h.name].length>60)latencyHistory[h.name].shift();
+  }
+  const colors=['#22d3ee','#34d399','#fbbf24','#f87171'];
+  const names=Object.keys(latencyHistory);
+  latencyChart.data.labels=(latencyHistory[names[0]]||[]).map((_,i)=>i);
+  latencyChart.data.datasets=names.map((n,i)=>({
+    label:n,data:latencyHistory[n],borderColor:colors[i%4],backgroundColor:colors[i%4]+'11',
+    fill:false,tension:.3,pointRadius:0,borderWidth:1.5
+  }));
+  latencyChart.update('none');
+}
+
+function render(data){
+  // Hero
+  const online=data.pm2.filter(s=>s.status==='online').length;
+  const total=data.pm2.length;
+  const allOk=online===total&&data.health.every(h=>h.status>=200&&h.status<400);
+  const heroDot=document.getElementById('heroDot');
+  const heroTitle=document.getElementById('heroTitle');
+  if(allOk){heroDot.className='hero-dot ok';heroTitle.textContent='ALL SYSTEMS OPERATIONAL';heroTitle.style.color='var(--green)';}
+  else{heroDot.className='hero-dot warn';heroTitle.textContent='DEGRADED';heroTitle.style.color='var(--amber)';}
+  document.getElementById('heroSub').textContent=data.node+' · '+new Date(data.ts).toLocaleTimeString('en-GB',{hour12:false});
+
+  document.getElementById('heroStats').innerHTML=[
+    {v:online+'/'+total,l:'Services'},
+    {v:fmtUptime(data.uptime),l:'Uptime'},
+    {v:data.tunnel.connectors,l:'Tunnels'},
+  ].map(s=>'<div class="hero-stat"><div class="hero-value tabnum" style="color:var(--cyan)">'+s.v+'</div><div class="hero-label">'+s.l+'</div></div>').join('');
+
+  // Gauges
+  const cpuPct=data.cpu;
+  const memPct=data.memory.total>0?(data.memory.used/data.memory.total)*100:0;
+  const diskPct=data.disk.total>0?(data.disk.used/data.disk.total)*100:0;
+  drawGauge('gCpu',cpuPct);document.getElementById('gCpuVal').textContent=cpuPct.toFixed(1)+'%';
+  drawGauge('gMem',memPct);document.getElementById('gMemVal').textContent=memPct.toFixed(1)+'%';
+  document.getElementById('gMemSub').textContent='RAM '+fmtBytes(data.memory.used)+' / '+fmtBytes(data.memory.total);
+  drawGauge('gDisk',diskPct);document.getElementById('gDiskVal').textContent=diskPct.toFixed(1)+'%';
+  document.getElementById('gDiskSub').textContent='Disk '+fmtBytes(data.disk.used)+' / '+fmtBytes(data.disk.total);
+  document.getElementById('loadVal').textContent=(data.load[0]||0).toFixed(2);
+  document.getElementById('loadAll').textContent=(data.load||[]).map(l=>l.toFixed(2)).join(' / ');
+
+  // PM2 Grid
+  document.getElementById('pm2Title').textContent='Services ('+online+'/'+total+' online)';
+  document.getElementById('pm2Grid').innerHTML=data.pm2.map(s=>{
+    const maxMem=512*1e6;
+    const memPct=Math.min(100,(s.memory/maxMem)*100);
+    return '<div class="svc-card '+s.status+'">'+
+      '<div class="svc-header"><div class="svc-dot '+s.status+'"></div><span class="svc-name">'+s.name+'</span></div>'+
+      '<div class="svc-detail">'+
+        '<div>Status<br><span class="val">'+s.status+'</span></div>'+
+        '<div>PID<br><span class="val tabnum">'+s.pid+'</span></div>'+
+        '<div>Uptime<br><span class="val tabnum">'+fmtPm2Up(s.uptime)+'</span></div>'+
+        '<div>Restarts<br><span class="val tabnum"'+(s.restarts>0?' style="color:var(--amber)"':'')+'>'+s.restarts+'</span></div>'+
+      '</div>'+
+      '<div class="mem-bar"><div class="mem-bar-fill" style="width:'+memPct+'%"></div></div>'+
+      '<div style="font-size:10px;color:var(--dim);margin-top:3px;display:flex;justify-content:space-between"><span>'+fmtBytes(s.memory)+'</span><span>CPU '+s.cpu+'%</span></div>'+
+    '</div>';
+  }).join('');
+
+  // Widgets
+  document.getElementById('tunnelCount').textContent=data.tunnel.connectors;
+  document.getElementById('tunnelCount').style.color=data.tunnel.connectors>0?'var(--green)':'var(--red)';
+  document.getElementById('healthList').innerHTML=(data.health||[]).map(h=>{
+    const up=h.status>=200&&h.status<400;
+    return '<div class="health-item"><div class="health-dot '+(up?'up':'down')+'"></div><span>'+h.name+'</span><span class="lat tabnum">'+(up?h.latency+'ms':'DOWN')+'</span></div>';
+  }).join('');
+  document.getElementById('failoverState').textContent=data.failover.state;
+  document.getElementById('failoverState').style.color=data.failover.state==='active'?'var(--green)':data.failover.state==='not paired yet'?'var(--dim)':'var(--amber)';
+  document.getElementById('syncLag').textContent=data.failover.syncLag;
+
+  // Charts
+  updateCharts(data);
+
+  // Footer
+  document.getElementById('footer').textContent='Oracle Server Monitor · Last update: '+new Date(data.ts).toLocaleTimeString('en-GB',{hour12:false})+' · Refresh: '+(POLL_MS/1000)+'s';
+}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/stats');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    document.getElementById('error').style.display='none';
+    render(data);
+  }catch(e){
+    document.getElementById('error').textContent='Connection lost: '+e.message;
+    document.getElementById('error').style.display='block';
+    const dot=document.getElementById('heroDot');if(dot)dot.className='hero-dot err';
+    const t=document.getElementById('heroTitle');if(t){t.textContent='CONNECTION LOST';t.style.color='var(--red)';}
+  }
+}
+
+function tryInitCharts(){if(typeof Chart!=='undefined')initCharts();else setTimeout(tryInitCharts,500)}
+tryInitCharts();
+poll();
+setInterval(poll,POLL_MS);
+
+// Resize gauges
+window.addEventListener('resize',()=>{if(lastData)render(lastData)});
+let lastData=null;
+const origRender=render;
+render=function(d){lastData=d;origRender(d)};
+</script>
+</body>
+</html>
