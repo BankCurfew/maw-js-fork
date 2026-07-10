@@ -30,6 +30,8 @@ const HEALTH_ENDPOINTS = [
   { name: "dream", url: "https://dream.vuttipipat.com" },
 ];
 
+const EXPECTED_OFFLINE = new Set(["maw-dev", "maw-boot"]);
+
 // History ring buffers for sparklines (last 60 samples = 30min at 30s interval)
 const MAX_HISTORY = 60;
 const cpuHistory: number[] = [];
@@ -68,6 +70,7 @@ async function collectStats() {
         restarts: a.pm2_env?.restart_time || 0,
         memory: a.monit?.memory || 0,
         cpu: a.monit?.cpu || 0,
+        expectedOffline: EXPECTED_OFFLINE.has(a.name),
       }));
     }
   } catch {}
@@ -81,7 +84,7 @@ async function collectStats() {
   const healthChecks = await Promise.all(HEALTH_ENDPOINTS.map(async (ep) => {
     const start = Date.now();
     try {
-      const r = await fetch(ep.url, { signal: AbortSignal.timeout(5000) });
+      const r = await fetch(ep.url, { signal: AbortSignal.timeout(5000), redirect: "manual" });
       return { name: ep.name, status: r.status, latency: Date.now() - start };
     } catch {
       return { name: ep.name, status: 0, latency: Date.now() - start };

@@ -294,10 +294,12 @@ function updateCharts(data){
 }
 
 function render(data){
-  // Hero
-  const online=data.pm2.filter(s=>s.status==='online').length;
-  const total=data.pm2.length;
-  const allOk=online===total&&data.health.every(h=>h.status>=200&&h.status<400);
+  // Hero — exclude expectedOffline from active count
+  const activeSvcs=data.pm2.filter(s=>!s.expectedOffline);
+  const online=activeSvcs.filter(s=>s.status==='online').length;
+  const total=activeSvcs.length;
+  const healthOk=data.health.every(h=>h.status>0&&h.status<400);
+  const allOk=online===total&&healthOk;
   const heroDot=document.getElementById('heroDot');
   const heroTitle=document.getElementById('heroTitle');
   if(allOk){heroDot.className='hero-dot ok';heroTitle.textContent='ALL SYSTEMS OPERATIONAL';heroTitle.style.color='var(--green)';}
@@ -327,7 +329,8 @@ function render(data){
   document.getElementById('pm2Grid').innerHTML=data.pm2.map(s=>{
     const maxMem=512*1e6;
     const memPct=Math.min(100,(s.memory/maxMem)*100);
-    return '<div class="svc-card '+s.status+'">'+
+    const dimStyle=s.expectedOffline?' style="opacity:0.4"':'';
+    return '<div class="svc-card '+s.status+'"'+dimStyle+'>'+
       '<div class="svc-header"><div class="svc-dot '+s.status+'"></div><span class="svc-name">'+s.name+'</span></div>'+
       '<div class="svc-detail">'+
         '<div>Status<br><span class="val">'+s.status+'</span></div>'+
@@ -344,7 +347,7 @@ function render(data){
   document.getElementById('tunnelCount').textContent=data.tunnel.connectors;
   document.getElementById('tunnelCount').style.color=data.tunnel.connectors>0?'var(--green)':'var(--red)';
   document.getElementById('healthList').innerHTML=(data.health||[]).map(h=>{
-    const up=h.status>=200&&h.status<400;
+    const up=h.status>0&&h.status<400;
     return '<div class="health-item"><div class="health-dot '+(up?'up':'down')+'"></div><span>'+h.name+'</span><span class="lat tabnum">'+(up?h.latency+'ms':'DOWN')+'</span></div>';
   }).join('');
   document.getElementById('failoverState').textContent=data.failover.state;
