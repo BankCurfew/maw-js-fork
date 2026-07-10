@@ -4,16 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Oracle — Server Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" async></script>
 <style>
 :root{--bg:#0a0e1a;--card:rgba(15,23,42,0.7);--card-border:rgba(56,189,248,0.12);--glass:rgba(15,23,42,0.5);--text:#e2e8f0;--dim:#64748b;--cyan:#22d3ee;--blue:#38bdf8;--green:#34d399;--amber:#fbbf24;--red:#f87171;--purple:#a78bfa}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden}
 body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 50%,rgba(56,189,248,0.04) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(34,211,238,0.03) 0%,transparent 50%);pointer-events:none;z-index:0}
 .container{max-width:1200px;margin:0 auto;padding:16px;position:relative;z-index:1}
-h1,h2,h3,.gauge-label,.hero-value{font-family:'Rajdhani',sans-serif}
+h1,h2,h3,.gauge-label,.hero-value{font-family:system-ui,-apple-system,sans-serif;font-weight:700}
 .tabnum{font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
 
 /* Hero Strip */
@@ -231,37 +228,60 @@ function drawGauge(canvasId,pct,prevPct){
   ctx.strokeStyle=col+'33';ctx.lineWidth=lw+6;ctx.lineCap='round';ctx.stroke();
 }
 
-// Charts
-let cpuMemChart=null,latencyChart=null;
+// Pure canvas area/line charts (no dependencies)
+function drawAreaChart(canvasId, datasets, maxY){
+  const c=document.getElementById(canvasId);if(!c)return;
+  const ctx=c.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const w=c.parentElement.clientWidth, h=c.parentElement.clientHeight;
+  c.width=w*dpr;c.height=h*dpr;c.style.width=w+'px';c.style.height=h+'px';
+  ctx.scale(dpr,dpr);
+  const pad={t:24,r:8,b:20,l:36};
+  const cw=w-pad.l-pad.r, ch=h-pad.t-pad.b;
 
-function initCharts(){
-  const commonOpts={responsive:true,maintainAspectRatio:false,animation:{duration:500},
-    plugins:{legend:{display:true,position:'top',labels:{color:'#64748b',font:{size:10},boxWidth:10,padding:8}}},
-    scales:{x:{display:false},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'},border:{display:false}}}
-  };
-  cpuMemChart=new Chart(document.getElementById('chartCpuMem'),{type:'line',
-    data:{labels:[],datasets:[
-      {label:'CPU %',data:[],borderColor:'#22d3ee',backgroundColor:'rgba(34,211,238,0.08)',fill:true,tension:.3,pointRadius:0,borderWidth:1.5},
-      {label:'RAM %',data:[],borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,0.06)',fill:true,tension:.3,pointRadius:0,borderWidth:1.5}
-    ]},options:{...commonOpts,scales:{...commonOpts.scales,y:{...commonOpts.scales.y,min:0,max:100}}}
-  });
-  latencyChart=new Chart(document.getElementById('chartLatency'),{type:'line',
-    data:{labels:[],datasets:[]},
-    options:{...commonOpts,scales:{...commonOpts.scales,y:{...commonOpts.scales.y,min:0,
-      ticks:{...commonOpts.scales.y.ticks,callback:v=>v+'ms'}}}}
-  });
+  // Grid
+  ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){
+    const y=pad.t+ch*(i/4);
+    ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();
+    ctx.fillStyle='#64748b';ctx.font='9px system-ui';ctx.textAlign='right';
+    ctx.fillText(Math.round(maxY*(1-i/4))+(maxY<=100?'%':'ms'),pad.l-4,y+3);
+  }
+
+  // Legend
+  let lx=pad.l;
+  for(const ds of datasets){
+    ctx.fillStyle=ds.color;ctx.fillRect(lx,4,8,8);
+    ctx.fillStyle='#94a3b8';ctx.font='10px system-ui';ctx.textAlign='left';
+    ctx.fillText(ds.label,lx+12,12);
+    lx+=ctx.measureText(ds.label).width+24;
+  }
+
+  // Draw each dataset
+  for(const ds of datasets){
+    const pts=ds.data;if(!pts||!pts.length)continue;
+    const stepX=cw/Math.max(pts.length-1,1);
+    ctx.beginPath();
+    for(let i=0;i<pts.length;i++){
+      const x=pad.l+i*stepX;
+      const y=pad.t+ch*(1-Math.min(pts[i],maxY)/maxY);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.strokeStyle=ds.color;ctx.lineWidth=1.5;ctx.stroke();
+    // Fill
+    ctx.lineTo(pad.l+(pts.length-1)*stepX,pad.t+ch);
+    ctx.lineTo(pad.l,pad.t+ch);ctx.closePath();
+    ctx.fillStyle=ds.color+'15';ctx.fill();
+  }
 }
 
 function updateCharts(data){
-  if(!cpuMemChart)return;
   const hist=data.history||{};
-  const labels=(hist.cpu||[]).map((_,i)=>i);
-  cpuMemChart.data.labels=labels;
-  cpuMemChart.data.datasets[0].data=hist.cpu||[];
-  cpuMemChart.data.datasets[1].data=hist.mem||[];
-  cpuMemChart.update('none');
+  drawAreaChart('chartCpuMem',[
+    {label:'CPU',data:hist.cpu||[],color:'#22d3ee'},
+    {label:'RAM',data:hist.mem||[],color:'#a78bfa'}
+  ],100);
 
-  // Latency history
   for(const h of (data.health||[])){
     if(!latencyHistory[h.name])latencyHistory[h.name]=[];
     latencyHistory[h.name].push(h.latency);
@@ -269,12 +289,8 @@ function updateCharts(data){
   }
   const colors=['#22d3ee','#34d399','#fbbf24','#f87171'];
   const names=Object.keys(latencyHistory);
-  latencyChart.data.labels=(latencyHistory[names[0]]||[]).map((_,i)=>i);
-  latencyChart.data.datasets=names.map((n,i)=>({
-    label:n,data:latencyHistory[n],borderColor:colors[i%4],backgroundColor:colors[i%4]+'11',
-    fill:false,tension:.3,pointRadius:0,borderWidth:1.5
-  }));
-  latencyChart.update('none');
+  const maxLat=Math.max(500,...names.flatMap(n=>latencyHistory[n]));
+  drawAreaChart('chartLatency',names.map((n,i)=>({label:n,data:latencyHistory[n],color:colors[i%4]})),maxLat);
 }
 
 function render(data){
@@ -357,8 +373,6 @@ async function poll(){
   }
 }
 
-function tryInitCharts(){if(typeof Chart!=='undefined')initCharts();else setTimeout(tryInitCharts,500)}
-tryInitCharts();
 poll();
 setInterval(poll,POLL_MS);
 
