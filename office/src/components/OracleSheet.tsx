@@ -585,12 +585,30 @@ export const OracleSheet = memo(function OracleSheet({
           }
           const isUser = m.role === "user";
           const sender = parseSender(m);
+          const raw = m.text || "";
+
+          // #122: 2-tier render — demote cc/noise to dim one-liners
+          // UNLESS the message contains keywords that need full attention
+          const fullBubbleKeywords = /needs your approval|needs your attention|report:|HOT|แบงค์|เดียร์|\[proposal\]|\[meeting\]/i;
+          const hasChipPaths = /(?:\/[\w฀-๿.\-\/]+\.(?:png|jpe?g|webp|gif|pdf|md|html|txt))/i.test(raw);
+          const isBackground = (sender.type === "cc" || (isUser && /\b(?:ack|standby|monitoring|noted|received|roger)\b/i.test(raw) && sender.label.startsWith("▶") && sender.label !== "▶ you"))
+            && !fullBubbleKeywords.test(raw) && !hasChipPaths;
+
+          if (isBackground) {
+            const chips = parseChips(raw);
+            const preview = sanitizeHarnessTags(chips.clean).slice(0, 120);
+            return `<div style="margin-bottom:2px;padding:2px 8px;font-size:11px;color:rgba(255,255,255,0.25);display:flex;align-items:baseline;gap:6px">
+              <span style="color:${sender.color};font-weight:500;font-size:10px;flex-shrink:0">${sender.label}</span>
+              ${m.ts ? `<span style="color:rgba(255,255,255,0.12);font-size:10px;flex-shrink:0">${esc(fmtTime(m.ts))}</span>` : ""}
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</span>
+            </div>`;
+          }
+
           const bubble = msgTypeBubble[sender.type] || msgTypeBubble.you;
           const bg = bubble.bg;
           const border = bubble.border;
           const label = `<span style="color:${sender.color};font-weight:600">${sender.label}</span>`;
           const ts = m.ts ? `<span style="color:rgba(255,255,255,0.2);margin-left:6px">${esc(fmtTime(m.ts))}</span>` : "";
-          const raw = m.text || "";
           const chips = parseChips(raw);
           const chipHtml = renderChips(chips);
           // T016: sanitize harness tags before render
@@ -904,12 +922,11 @@ export const OracleSheet = memo(function OracleSheet({
 
     async function pollNew() {
       try {
-        // Prune stale optimistic bubbles (>15s). A pending "you" message is
-        // reconciled when its echo lands in the local transcript — but a
-        // federated send (e.g. to nobi on another node) never echoes back
-        // here, so without this it stays pinned at the bottom forever.
+        // Prune stale optimistic bubbles (>5min). Long timeout because queued
+        // messages during BUSY can wait minutes before the oracle processes them.
+        // Federated sends that never echo back get cleaned up eventually.
         const now = Date.now();
-        const stale = (m: any) => m.pending && now - new Date(m.ts || 0).getTime() > 15000;
+        const stale = (m: any) => m.pending && now - new Date(m.ts || 0).getTime() > 300000;
         if (msgsRef.current.some(stale)) {
           msgsRef.current = msgsRef.current.filter((m: any) => !stale(m));
           const el0 = termRef.current;
